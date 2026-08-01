@@ -54,7 +54,7 @@ def create_test_event(organization_id: str, payload: OnboardingTestEvent, princi
         "idempotency_key": f"onboarding:{uuid.uuid4()}", "request_timestamp": now,
         "provider": payload.provider.value, "model": payload.model,
         "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": 20,
-        "calculated_cost": calculate_cost(payload.provider.value, payload.model, prompt_tokens, completion_tokens),
+        "calculated_cost": str(calculate_cost(payload.provider.value, payload.model, prompt_tokens, completion_tokens)),
         "project": "tokenwatch-onboarding", "agent": "setup-wizard", "environment": "test",
         "metadata": {"onboarding_test": True},
     }).execute().data[0]
