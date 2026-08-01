@@ -42,3 +42,11 @@ def test_migration_tracks_real_event_and_budget_references():
     source = Path("migrations/202608010003_phase3_product_experience.sql").read_text(encoding="utf-8")
     assert "test_usage_log_id uuid references public.usage_logs" in source
     assert "first_budget_id uuid references public.budget_policies" in source
+
+
+def test_onboarding_cost_is_json_safe_and_database_clients_are_thread_scoped():
+    onboarding = Path("routers/onboarding.py").read_text(encoding="utf-8")
+    database = Path("utils/database.py").read_text(encoding="utf-8")
+    assert '"calculated_cost": str(calculate_cost(' in onboarding
+    assert "threading.local()" in database
+    assert "@lru_cache" not in database
