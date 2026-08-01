@@ -23,6 +23,13 @@ def test_onboarding_test_event_uses_atomic_ingestion():
     assert 'rpc("ingest_usage_atomic"' in source
     assert 'table("usage_logs").insert' not in source
 
+def test_usage_reporting_pages_past_data_api_row_limit():
+    source=Path("routers/usage.py").read_text(encoding="utf-8")
+    assert "def _all_filtered_logs" in source
+    assert "page_size = [], 0, 1000" in source
+    assert "offset += page_size" in source
+    assert "logs = _all_filtered_logs(tenant, selected.start_utc" in source
+
 def test_ist_midnight_uses_iana_boundary():
     selected=report_range("Asia/Kolkata","today",now=datetime(2026,8,1,12,tzinfo=timezone.utc))
     assert selected.start_utc.isoformat()=="2026-07-31T18:30:00+00:00"

@@ -23,13 +23,28 @@ def reconcile(payload: ReconciliationRequest, tenant: TenantContext = Depends(ge
     return result
 
 
-def _filtered_query(tenant: TenantContext, start: datetime | None, end: datetime | None, provider: str | None, model: str | None):
-    query = get_db().table("usage_logs").select("*").eq("organization_id", tenant.organization_id).is_("deleted_at", "null")
+def _filtered_query(tenant: TenantContext, start: datetime | None, end: datetime | None, provider: str | None, model: str | None, columns: str = "*"):
+    query = get_db().table("usage_logs").select(columns).eq("organization_id", tenant.organization_id).is_("deleted_at", "null")
     if start: query = query.gte("request_timestamp", start.isoformat())
     if end: query = query.lt("request_timestamp", end.isoformat())
     if provider: query = query.eq("provider", provider)
     if model: query = query.eq("model", model)
     return query
+
+
+def _all_filtered_logs(tenant: TenantContext, start: datetime | None = None, end: datetime | None = None,
+                       provider: str | None = None, model: str | None = None, columns: str = "*",
+                       order_by: str | None = None) -> list[dict]:
+    rows, offset, page_size = [], 0, 1000
+    while True:
+        query = _filtered_query(tenant, start, end, provider, model, columns)
+        if order_by:
+            query = query.order(order_by)
+        batch = query.range(offset, offset + page_size - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            return rows
+        offset += page_size
 
 
 @router.post("/log", status_code=410)
@@ -39,7 +54,7 @@ def legacy_log_disabled():
 
 @router.get("/stats")
 def get_stats(tenant: TenantContext = Depends(get_tenant)):
-    logs = get_db().table("usage_logs").select("provider,total_tokens,calculated_cost,agent").eq("organization_id", tenant.organization_id).is_("deleted_at", "null").execute().data or []
+    logs = _all_filtered_logs(tenant, columns="provider,total_tokens,calculated_cost,agent")
     by_provider, by_agent = {}, {}
     for log in logs:
         for bucket, name in ((by_provider, log.get("provider", "unknown")), (by_agent, log.get("agent", "default"))):
@@ -50,7 +65,7 @@ def get_stats(tenant: TenantContext = Depends(get_tenant)):
 
 @router.get("/history")
 def get_history(timezone_name: str = Query(default="UTC", alias="timezone"), tenant: TenantContext = Depends(get_tenant)):
-    logs = get_db().table("usage_logs").select("provider,total_tokens,calculated_cost,request_timestamp").eq("organization_id", tenant.organization_id).is_("deleted_at", "null").order("request_timestamp").execute().data or []
+    logs = _all_filtered_logs(tenant, columns="provider,total_tokens,calculated_cost,request_timestamp", order_by="request_timestamp")
     today = datetime.now(timezone.utc).astimezone(timezone_or_422(timezone_name)).date()
     providers = sorted({x["provider"] for x in logs})
     grouped = defaultdict(dict)
@@ -90,7 +105,7 @@ def aggregate_usage(
     tenant: TenantContext = Depends(get_tenant),
 ):
     selected = report_range(timezone_name, preset, start, end)
-    logs = _filtered_query(tenant, selected.start_utc, selected.end_utc, provider, model).execute().data or []
+    logs = _all_filtered_logs(tenant, selected.start_utc, selected.end_utc, provider, model)
     dimensions = {name: {} for name in ("provider", "model", "project", "environment")}
     daily: dict[str, dict] = {}
     for log in logs:

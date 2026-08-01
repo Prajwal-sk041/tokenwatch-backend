@@ -11,7 +11,7 @@ Phase 5.6 migration `phase56_atomic_usage` was applied to the healthy production
 
 The final zero-token bounded load profiles passed with all usage IDs unique: 40/10, 100/20, and 500/50. Live session, key, policy, reconciliation, dashboard/timezone, and cleanup checks passed. Local backend and frontend release suites passed.
 
-The release remains **NO-GO** because the onboarding test-event endpoint was found to bypass atomic ingestion. The fix on `agent/rc-counter-integrity` must be reviewed, merged, deployed, and verified before launch. Production email, billing/webhook, alert scheduling, external monitoring, and confirmed backup/PITR activation are also incomplete.
+The onboarding counter-integrity fix was subsequently merged and verified in production. That verification exposed a second release blocker: usage reporting silently stopped at the Supabase Data API's 1,000-row response limit while the database contained 1,495 events. The release remains **NO-GO** until paginated reporting is merged, deployed, and verified. Production email, billing/webhook, alert scheduling, external monitoring, and confirmed backup/PITR activation are also incomplete.
 
 ## Production database activation
 
@@ -83,9 +83,17 @@ Fix: route onboarding test events through the same atomic ingestion RPC with the
 
 Required activation: merge and deploy the draft PR, execute an onboarding test event in production, and verify dry-run reconciliation remains exact.
 
+Post-merge verification passed on production deployment `1f899ec`: the onboarding event added exactly 12 prompt tokens, 8 completion tokens, and $0.00000660 while dry-run reconciliation remained exact at 1,495 requests. The temporary SDK key was revoked.
+
+## Post-merge reporting defect
+
+The post-merge dashboard check found 1,495 database events but `/usage/aggregate` returned exactly 1,000. Root cause: aggregate, stats, and history endpoints issued a single Data API query and silently inherited the configured 1,000-row response limit.
+
+The remediation on `agent/rc-usage-pagination` fetches filtered usage in bounded 1,000-row pages for aggregate, stats, and history endpoints. Local result: 50/50 backend tests passed. This fix must be merged, deployed, and live-verified before GO.
+
 ## Remaining launch blockers
 
-1. Merge, deploy, and live-verify the onboarding atomic-ingestion fix.
+1. Merge, deploy, and live-verify the usage reporting pagination fix at more than 1,000 events.
 2. Configure and verify production email provider/domain; complete registration verification and password-reset confirmation.
 3. Configure Stripe production/test acceptance credentials and webhook; complete checkout, invoice, cancellation, and refund acceptance.
 4. Configure the alert scheduler and a real delivery channel; verify deduplication and retry behavior.
