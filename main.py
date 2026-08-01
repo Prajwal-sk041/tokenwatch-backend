@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
 from logging_config import configure_logging, csrf_origin_middleware, request_id_middleware
-from routers import alerts, audit, auth, budgets, ingestion, keys, organizations, policy, sdk_keys, subscriptions, usage
+from routers import alerts, audit, auth, budgets, ingestion, keys, onboarding, organizations, policy, sdk_keys, subscriptions, usage
 from utils.database import check_database_connection
 
 
@@ -43,8 +43,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allowed_origins),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-TokenWatch-Key"],
 )
 
 app.include_router(auth.router)
@@ -52,6 +52,7 @@ app.include_router(keys.router)
 app.include_router(usage.router)
 app.include_router(alerts.router)
 app.include_router(organizations.router)
+app.include_router(onboarding.router)
 app.include_router(sdk_keys.router)
 app.include_router(ingestion.router)
 app.include_router(policy.router)

@@ -41,4 +41,15 @@ All JSON request models reject unknown fields. Browser routes use HttpOnly sessi
 
 - `GET /subscriptions/plans`
 - `GET /subscriptions/{organization_id}`
-- `PUT /subscriptions/{organization_id}` requires the organization owner.
+- `PUT /subscriptions/{organization_id}` always returns `403`; paid-plan changes require the trusted Phase 4 billing service.
+
+## Phase 3 product APIs
+
+- `GET|PUT /onboarding/{organization_id}` resumes or persists onboarding progress.
+- `POST|GET /onboarding/{organization_id}/test-event` records and verifies a real SDK-authenticated onboarding event.
+- `GET /usage/events` returns paginated tenant usage with date, provider, and model filters.
+- `GET /usage/aggregate` returns dashboard totals, breakdowns, trends, and a UTC projection.
+- `PATCH|DELETE /budgets/{organization_id}/{budget_id}` manages the budget lifecycle.
+- `PATCH|DELETE /organizations/{organization_id}/members/{member_id}` provides owner-controlled role and removal actions.
+- `POST /organizations/{organization_id}/invites/{member_id}/resend` rotates and resends a pending invitation.
+- `POST /auth/verify-email/resend` returns a non-enumerating resend response.

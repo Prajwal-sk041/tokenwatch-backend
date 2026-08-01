@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from dependencies import get_tenant
-from schemas.requests import AlertCreate
+from schemas.requests import AlertCreate, AlertUpdate
 from services.audit import record_audit
 from services.tenant import TenantContext
 from utils.database import get_db
@@ -31,6 +31,7 @@ def create_alert(payload: AlertCreate, tenant: TenantContext = Depends(get_tenan
 
 @router.patch("/toggle/{alert_id}")
 def toggle_alert(alert_id: str, tenant: TenantContext = Depends(get_tenant)):
+    if tenant.role == "viewer": raise HTTPException(status_code=403, detail="Viewer cannot change alerts")
     rows = get_db().table("alert_rules").select("is_active").eq("id", alert_id).eq("organization_id", tenant.organization_id).limit(1).execute().data or []
     if not rows: raise HTTPException(status_code=404, detail="Alert not found")
     state = not rows[0]["is_active"]
@@ -40,9 +41,23 @@ def toggle_alert(alert_id: str, tenant: TenantContext = Depends(get_tenant)):
 
 @router.delete("/delete/{alert_id}")
 def delete_alert(alert_id: str, tenant: TenantContext = Depends(get_tenant)):
+    if tenant.role == "viewer": raise HTTPException(status_code=403, detail="Viewer cannot delete alerts")
     now = datetime.now(timezone.utc).isoformat()
     get_db().table("alert_rules").update({"is_active": False, "deleted_at": now}).eq("id", alert_id).eq("organization_id", tenant.organization_id).execute()
     return {"message": "Alert deleted"}
+
+
+@router.patch("/{alert_id}")
+def update_alert(alert_id: str, payload: AlertUpdate, tenant: TenantContext = Depends(get_tenant)):
+    if tenant.role == "viewer": raise HTTPException(status_code=403, detail="Viewer cannot change alerts")
+    values = payload.model_dump(exclude_none=True)
+    if values.get("destination") and not values["destination"].startswith("https://"):
+        rows = get_db().table("alert_rules").select("channel").eq("id", alert_id).eq("organization_id", tenant.organization_id).limit(1).execute().data or []
+        if rows and rows[0]["channel"] == "webhook": raise HTTPException(status_code=422, detail="Webhook destination must use HTTPS")
+    rows = get_db().table("alert_rules").update(values).eq("id", alert_id).eq("organization_id", tenant.organization_id).is_("deleted_at", "null").execute().data or []
+    if not rows: raise HTTPException(status_code=404, detail="Alert not found")
+    record_audit("alert.updated", organization_id=tenant.organization_id, actor_user_id=tenant.user_id, target_type="alert_rule", target_id=alert_id)
+    return rows[0]
 
 
 @router.get("/history")

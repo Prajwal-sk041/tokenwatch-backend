@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 
 from dependencies import Principal, get_principal, get_tenant
-from schemas.requests import OrganizationCreate, OrganizationInvite
+from schemas.requests import MemberRoleUpdate, OrganizationCreate, OrganizationInvite
 from services.audit import record_audit
 from services.security import generate_opaque_token, hash_secret
 from services.tenant import TenantContext, require_membership
@@ -70,3 +70,37 @@ def accept_invite(payload: TokenActionRequest, principal: Principal = Depends(ge
 def list_members(organization_id: str, principal: Principal = Depends(get_principal)):
     require_membership(principal.user_id, organization_id)
     return get_db().table("organization_members").select("id,user_id,invited_email,role,status,joined_at,created_at").eq("organization_id", organization_id).is_("deleted_at", "null").execute().data or []
+
+
+@router.patch("/{organization_id}/members/{member_id}")
+def change_member_role(organization_id: str, member_id: str, payload: MemberRoleUpdate, principal: Principal = Depends(get_principal)):
+    require_membership(principal.user_id, organization_id, "owner")
+    rows = get_db().table("organization_members").select("role,user_id").eq("id", member_id).eq("organization_id", organization_id).is_("deleted_at", "null").limit(1).execute().data or []
+    if not rows: raise HTTPException(status_code=404, detail="Member not found")
+    if rows[0]["role"] == "owner": raise HTTPException(status_code=403, detail="Owner role cannot be changed")
+    updated = get_db().table("organization_members").update({"role": payload.role}).eq("id", member_id).eq("organization_id", organization_id).execute().data[0]
+    record_audit("organization.member_role_changed", organization_id=organization_id, actor_user_id=principal.user_id, target_type="organization_member", target_id=member_id, metadata={"role": payload.role})
+    return updated
+
+
+@router.delete("/{organization_id}/members/{member_id}", status_code=204)
+def remove_member(organization_id: str, member_id: str, principal: Principal = Depends(get_principal)):
+    require_membership(principal.user_id, organization_id, "owner")
+    rows = get_db().table("organization_members").select("role").eq("id", member_id).eq("organization_id", organization_id).is_("deleted_at", "null").limit(1).execute().data or []
+    if not rows: raise HTTPException(status_code=404, detail="Member not found")
+    if rows[0]["role"] == "owner": raise HTTPException(status_code=403, detail="Owner cannot be removed")
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().table("organization_members").update({"status": "revoked", "deleted_at": now}).eq("id", member_id).eq("organization_id", organization_id).execute()
+    record_audit("organization.member_removed", organization_id=organization_id, actor_user_id=principal.user_id, target_type="organization_member", target_id=member_id)
+
+
+@router.post("/{organization_id}/invites/{member_id}/resend")
+def resend_invite(organization_id: str, member_id: str, principal: Principal = Depends(get_principal)):
+    require_membership(principal.user_id, organization_id, "admin")
+    rows = get_db().table("organization_members").select("*").eq("id", member_id).eq("organization_id", organization_id).eq("status", "invited").is_("deleted_at", "null").limit(1).execute().data or []
+    if not rows: raise HTTPException(status_code=404, detail="Pending invitation not found")
+    token = generate_opaque_token("twi_"); expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    get_db().table("organization_members").update({"invitation_token_hash": hash_secret(token), "invitation_expires_at": expires}).eq("id", member_id).execute()
+    delivered = send_action_email("You were invited to TokenWatch", f"{str(get_settings().app_base_url).rstrip('/')}/accept-invite?token={token}", rows[0]["invited_email"])
+    record_audit("organization.invite_resent", organization_id=organization_id, actor_user_id=principal.user_id, target_type="organization_member", target_id=member_id)
+    return {"status": "sent" if delivered else "unavailable"}
