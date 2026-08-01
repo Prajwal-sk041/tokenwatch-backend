@@ -107,3 +107,14 @@ def resend_invite(organization_id: str, member_id: str, principal: Principal = D
     delivered = send_action_email("You were invited to TokenWatch", f"{str(get_settings().app_base_url).rstrip('/')}/accept-invite?token={token}", rows[0]["invited_email"])
     record_audit("organization.invite_resent", organization_id=organization_id, actor_user_id=principal.user_id, target_type="organization_member", target_id=member_id)
     return {"status": "sent" if delivered else "unavailable"}
+
+
+@router.delete("/{organization_id}/invites/{member_id}", status_code=204)
+def cancel_invite(organization_id: str, member_id: str, principal: Principal = Depends(get_principal)):
+    require_membership(principal.user_id, organization_id, "admin")
+    now = datetime.now(timezone.utc).isoformat()
+    rows = get_db().table("organization_members").update({"status": "revoked", "deleted_at": now,
+        "invitation_token_hash": None}).eq("id", member_id).eq("organization_id", organization_id).eq("status", "invited").execute().data or []
+    if not rows: raise HTTPException(status_code=404, detail="Pending invitation not found")
+    record_audit("organization.invite_cancelled", organization_id=organization_id, actor_user_id=principal.user_id,
+        target_type="organization_member", target_id=member_id)

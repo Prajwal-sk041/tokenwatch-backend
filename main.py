@@ -17,17 +17,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
-    scheduler = None
-    if settings.alert_scheduler_enabled:
-        from scheduler import start_scheduler
-
-        scheduler = start_scheduler()
-        logger.info("alert scheduler started")
     yield
-    if scheduler:
-        scheduler.shutdown(wait=False)
-        logger.info("alert scheduler stopped")
 
 
 settings = get_settings()

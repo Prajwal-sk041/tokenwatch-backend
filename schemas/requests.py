@@ -136,8 +136,8 @@ class UsageLog(StrictModel):
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
-        if value > now + timedelta(minutes=5) or value < now - timedelta(minutes=15):
-            raise ValueError("timestamp must be within the accepted replay window")
+        if value > now + timedelta(minutes=5) or value < now - timedelta(days=366):
+            raise ValueError("timestamp must be within the accepted event window")
         return value
 
     @model_validator(mode="after")
@@ -224,4 +224,8 @@ class AlertUpdate(StrictModel):
     threshold: float | None = Field(default=None, gt=0, le=1_000_000_000)
     is_active: bool | None = None
     destination: str | None = Field(default=None, max_length=2048)
+
+
+class ReconciliationRequest(StrictModel):
+    repair: bool = False
 
