@@ -5,8 +5,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from logging_config import configure_logging, csrf_origin_middleware, request_id_middleware
-from routers import admin, alerts, audit, auth, billing, budgets, ingestion, keys, onboarding, organizations, policy, sdk_keys, subscriptions, usage
+from logging_config import configure_logging, csrf_origin_middleware, request_id_middleware, security_headers_middleware
+from routers import admin, alerts, audit, auth, billing, budgets, ingestion, keys, onboarding, operations, organizations, policy, sdk_keys, subscriptions, usage
 from utils.database import check_database_connection
 import sentry_sdk
 
@@ -42,6 +42,7 @@ app = FastAPI(
 )
 app.middleware("http")(request_id_middleware)
 app.middleware("http")(csrf_origin_middleware)
+app.middleware("http")(security_headers_middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allowed_origins),
@@ -64,6 +65,7 @@ app.include_router(audit.router)
 app.include_router(subscriptions.router)
 app.include_router(billing.router)
 app.include_router(admin.router)
+app.include_router(operations.router)
 
 
 @app.get("/")

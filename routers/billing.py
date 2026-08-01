@@ -31,7 +31,7 @@ def checkout(organization_id: str, payload: CheckoutCreate, principal: Principal
     require_membership(principal.user_id, organization_id, "owner")
     users = get_db().table("users").select("email").eq("id", principal.user_id).limit(1).execute().data or []
     if not users: raise HTTPException(status_code=404, detail="User not found")
-    url = billing_service.checkout(organization_id, users[0]["email"], payload.plan_code, payload.billing_interval)
+    url = billing_service.checkout(organization_id, users[0]["email"], payload.plan_code, payload.billing_interval, payload.coupon_code)
     record_audit("billing.checkout_created", organization_id=organization_id, actor_user_id=principal.user_id, metadata={"plan": payload.plan_code, "interval": payload.billing_interval})
     return {"url": url}
 
@@ -40,6 +40,14 @@ def checkout(organization_id: str, payload: CheckoutCreate, principal: Principal
 def portal(organization_id: str, payload: PortalCreate, principal: Principal = Depends(get_principal)):
     require_membership(principal.user_id, organization_id, "owner")
     return {"url": billing_service.portal(organization_id, payload.return_path)}
+
+
+@router.post("/{organization_id}/resume", status_code=202)
+def resume(organization_id: str, principal: Principal = Depends(get_principal)):
+    require_membership(principal.user_id, organization_id, "owner")
+    billing_service.resume(organization_id)
+    record_audit("subscription.resume_requested", organization_id=organization_id, actor_user_id=principal.user_id)
+    return {"status": "processing"}
 
 
 @router.post("/webhooks/stripe", include_in_schema=False)

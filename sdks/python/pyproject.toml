@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tokenwatch"
+version = "1.0.0"
+description = "Official TokenWatch Python SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["httpx>=0.27,<1"]
+
+[project.urls]
+Documentation = "https://tokenwatch-frontend.vercel.app/docs"

@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from utils.database import get_db
+from config import get_settings
 
 
 @dataclass(frozen=True)
@@ -30,8 +31,9 @@ class PlanService:
         if not price_id:
             return None
         rows = get_db().table("plans").select("*").eq("is_active", True).execute().data or []
+        env = get_settings().stripe_environment
         for plan in rows:
-            if plan.get("stripe_price_id") == price_id or (plan.get("features") or {}).get("stripe_annual_price_id") == price_id:
+            if plan.get(f"stripe_{env}_monthly_price_id") == price_id or plan.get(f"stripe_{env}_annual_price_id") == price_id:
                 return plan
         return None
 

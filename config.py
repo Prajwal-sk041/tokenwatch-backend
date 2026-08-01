@@ -27,10 +27,12 @@ class Settings(BaseModel):
     resend_api_key: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
+    stripe_environment: str = "test"
     stripe_tax_enabled: bool = False
     sentry_dsn: str = ""
     sentry_environment: str = "production"
     admin_emails: tuple[str, ...] = ()
+    public_status_cache_seconds: int = Field(default=30, ge=5, le=300)
     email_preview_enabled: bool = False
     alert_scheduler_enabled: bool = False
     api_key_encryption_key: str
@@ -57,6 +59,13 @@ class Settings(BaseModel):
         if not values or any(value == "*" for value in values):
             raise ValueError("CORS_ALLOWED_ORIGINS must contain explicit origins")
         return values
+
+    @field_validator("stripe_environment")
+    @classmethod
+    def validate_stripe_environment(cls, value: str) -> str:
+        if value not in {"test", "live"}:
+            raise ValueError("STRIPE_ENVIRONMENT must be test or live")
+        return value
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -85,10 +94,12 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         resend_api_key=env.get("RESEND_API_KEY", ""),
         stripe_secret_key=env.get("STRIPE_SECRET_KEY", ""),
         stripe_webhook_secret=env.get("STRIPE_WEBHOOK_SECRET", ""),
+        stripe_environment=env.get("STRIPE_ENVIRONMENT", "test"),
         stripe_tax_enabled=env.get("STRIPE_TAX_ENABLED", "false").lower() in {"1", "true", "yes", "on"},
         sentry_dsn=env.get("SENTRY_DSN", ""),
         sentry_environment=env.get("SENTRY_ENVIRONMENT", "production"),
         admin_emails=tuple(x.strip().lower() for x in env.get("ADMIN_EMAILS", "").split(",") if x.strip()),
+        public_status_cache_seconds=env.get("PUBLIC_STATUS_CACHE_SECONDS", "30"),
         email_preview_enabled=env.get("EMAIL_PREVIEW_ENABLED", "false").lower() in {"1", "true", "yes", "on"},
         alert_scheduler_enabled=env.get("ALERT_SCHEDULER_ENABLED", "false").lower()
         in {"1", "true", "yes", "on"},
