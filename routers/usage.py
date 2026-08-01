@@ -5,16 +5,28 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from dependencies import get_tenant
 from services.tenant import TenantContext
+from schemas.requests import ReconciliationRequest
+from services.reporting import local_day, report_range, timezone_or_422
 from utils.database import get_db
 
 
 router = APIRouter(prefix="/usage", tags=["Usage"])
 
 
+@router.post("/reconcile")
+def reconcile(payload: ReconciliationRequest, tenant: TenantContext = Depends(get_tenant)):
+    if tenant.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Owner or admin role required")
+    result = get_db().rpc("reconcile_usage_counters", {
+        "p_organization_id": tenant.organization_id, "p_repair": payload.repair,
+        "p_actor_user_id": tenant.user_id}).execute().data
+    return result
+
+
 def _filtered_query(tenant: TenantContext, start: datetime | None, end: datetime | None, provider: str | None, model: str | None):
     query = get_db().table("usage_logs").select("*").eq("organization_id", tenant.organization_id).is_("deleted_at", "null")
-    if start: query = query.gte("created_at", start.isoformat())
-    if end: query = query.lte("created_at", end.isoformat())
+    if start: query = query.gte("request_timestamp", start.isoformat())
+    if end: query = query.lt("request_timestamp", end.isoformat())
     if provider: query = query.eq("provider", provider)
     if model: query = query.eq("model", model)
     return query
@@ -37,13 +49,13 @@ def get_stats(tenant: TenantContext = Depends(get_tenant)):
 
 
 @router.get("/history")
-def get_history(tenant: TenantContext = Depends(get_tenant)):
-    logs = get_db().table("usage_logs").select("provider,total_tokens,calculated_cost,created_at").eq("organization_id", tenant.organization_id).is_("deleted_at", "null").order("created_at").execute().data or []
-    today = datetime.now(timezone.utc).date()
+def get_history(timezone_name: str = Query(default="UTC", alias="timezone"), tenant: TenantContext = Depends(get_tenant)):
+    logs = get_db().table("usage_logs").select("provider,total_tokens,calculated_cost,request_timestamp").eq("organization_id", tenant.organization_id).is_("deleted_at", "null").order("request_timestamp").execute().data or []
+    today = datetime.now(timezone.utc).astimezone(timezone_or_422(timezone_name)).date()
     providers = sorted({x["provider"] for x in logs})
     grouped = defaultdict(dict)
     for log in logs:
-        day = str(log["created_at"])[:10]; entry = grouped[day].setdefault(log["provider"], {"tokens": 0, "cost": 0.0, "requests": 0})
+        day = local_day(str(log["request_timestamp"]), timezone_name); entry = grouped[day].setdefault(log["provider"], {"tokens": 0, "cost": 0.0, "requests": 0})
         entry["tokens"] += int(log["total_tokens"]); entry["cost"] += float(log["calculated_cost"]); entry["requests"] += 1
     if not grouped: return {"chart": [], "providers": [], "provider_summary": {}, "server_today": today.isoformat()}
     current, chart = date.fromisoformat(min(grouped)), []
@@ -59,20 +71,26 @@ def get_history(tenant: TenantContext = Depends(get_tenant)):
 @router.get("/events")
 def list_events(
     page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100),
-    start: datetime | None = None, end: datetime | None = None, provider: str | None = None, model: str | None = None,
+    start: datetime | None = None, end: datetime | None = None, preset: str | None = None,
+    timezone_name: str = Query(default="UTC", alias="timezone"), provider: str | None = None, model: str | None = None,
     tenant: TenantContext = Depends(get_tenant),
 ):
+    if preset:
+        selected = report_range(timezone_name, preset, start.date() if start else None, end.date() if end else None)
+        start, end = selected.start_utc, selected.end_utc
     query = _filtered_query(tenant, start, end, provider, model)
-    rows = query.order("created_at", desc=True).range((page - 1) * page_size, page * page_size).execute().data or []
+    rows = query.order("request_timestamp", desc=True).range((page - 1) * page_size, page * page_size).execute().data or []
     return {"items": rows[:page_size], "page": page, "page_size": page_size, "has_more": len(rows) > page_size}
 
 
 @router.get("/aggregate")
 def aggregate_usage(
-    start: datetime | None = None, end: datetime | None = None, provider: str | None = None, model: str | None = None,
+    start: date | None = None, end: date | None = None, preset: str = "30d",
+    timezone_name: str = Query(default="UTC", alias="timezone"), provider: str | None = None, model: str | None = None,
     tenant: TenantContext = Depends(get_tenant),
 ):
-    logs = _filtered_query(tenant, start, end, provider, model).execute().data or []
+    selected = report_range(timezone_name, preset, start, end)
+    logs = _filtered_query(tenant, selected.start_utc, selected.end_utc, provider, model).execute().data or []
     dimensions = {name: {} for name in ("provider", "model", "project", "environment")}
     daily: dict[str, dict] = {}
     for log in logs:
@@ -81,7 +99,7 @@ def aggregate_usage(
             key = log.get(dimension) or "unknown"
             bucket = dimensions[dimension].setdefault(key, {"requests": 0, "tokens": 0, "cost": 0.0})
             bucket["requests"] += 1; bucket["tokens"] += tokens; bucket["cost"] += cost
-        day = str(log["created_at"])[:10]
+        day = local_day(str(log["request_timestamp"]), timezone_name)
         bucket = daily.setdefault(day, {"date": day, "requests": 0, "tokens": 0, "cost": 0.0})
         bucket["requests"] += 1; bucket["tokens"] += tokens; bucket["cost"] += cost
     for groups in dimensions.values():
@@ -91,5 +109,6 @@ def aggregate_usage(
     return {
         "totals": {"requests": len(logs), "tokens": sum(int(x.get("total_tokens") or 0) for x in logs), "cost": round(total_cost, 8)},
         "breakdowns": dimensions, "daily": sorted(daily.values(), key=lambda x: x["date"]),
-        "current_month_projection": round(total_cost / elapsed * 30, 8), "timezone": "UTC",
+        "current_month_projection": round(total_cost / elapsed * 30, 8), "timezone": timezone_name,
+        "range": {"preset": preset, "start_utc": selected.start_utc.isoformat(), "end_utc_exclusive": selected.end_utc.isoformat()},
     }

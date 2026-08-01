@@ -1,16 +1,27 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request, Response, HTTPException
 
 from config import get_settings
 from dependencies import Principal, get_principal, require_platform_admin
 from schemas.requests import SupportTicketCreate
 from services.audit import record_audit
 from services.rate_limit import consume
+from services.alerts import evaluate_alerts
+import secrets
 from utils.database import check_database_connection, get_db
 
 
 router = APIRouter(tags=["Operations"])
+
+
+@router.get("/internal/jobs/alerts")
+def run_alert_job(request: Request):
+    configured = get_settings().cron_secret
+    supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
+    if not configured or not secrets.compare_digest(supplied, configured):
+        raise HTTPException(status_code=401, detail="Invalid scheduled-job credential")
+    return evaluate_alerts()
 
 
 @router.get("/status")
@@ -20,7 +31,7 @@ def public_status(response: Response):
     database_ok = check_database_connection()
     incidents = get_db().table("service_incidents").select("service,title,message,status,impact,started_at,resolved_at").order("started_at", desc=True).limit(50).execute().data or [] if database_ok else []
     active = {x["service"] for x in incidents if x["status"] != "resolved"}
-    configured = {"api": True, "database": database_ok, "scheduler": settings.alert_scheduler_enabled,
+    configured = {"api": True, "database": database_ok, "scheduler": bool(settings.cron_secret),
         "email": bool(settings.resend_api_key or settings.smtp_host), "billing": bool(settings.stripe_secret_key),
         "webhook": bool(settings.stripe_webhook_secret)}
     services = [{"name": name, "status": "outage" if name in active else ("operational" if ready else "not_configured")} for name, ready in configured.items()]

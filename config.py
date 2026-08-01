@@ -3,7 +3,7 @@ import os
 from typing import Mapping
 
 from cryptography.fernet import Fernet
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 
 class Settings(BaseModel):
@@ -35,7 +35,14 @@ class Settings(BaseModel):
     public_status_cache_seconds: int = Field(default=30, ge=5, le=300)
     email_preview_enabled: bool = False
     alert_scheduler_enabled: bool = False
+    cron_secret: str = ""
     api_key_encryption_key: str
+
+    @model_validator(mode="after")
+    def reject_unsafe_production_preview(self):
+        if self.sentry_environment == "production" and self.email_preview_enabled:
+            raise ValueError("EMAIL_PREVIEW_ENABLED is forbidden in production")
+        return self
 
     @field_validator("jwt_algorithm")
     @classmethod
@@ -103,6 +110,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         email_preview_enabled=env.get("EMAIL_PREVIEW_ENABLED", "false").lower() in {"1", "true", "yes", "on"},
         alert_scheduler_enabled=env.get("ALERT_SCHEDULER_ENABLED", "false").lower()
         in {"1", "true", "yes", "on"},
+        cron_secret=env.get("CRON_SECRET", ""),
         api_key_encryption_key=env.get("API_KEY_ENCRYPTION_KEY", ""),
     )
 

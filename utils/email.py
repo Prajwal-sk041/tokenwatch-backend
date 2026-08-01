@@ -44,10 +44,23 @@ def send_alert_email(subject: str, body_html: str, receiver: str | None = None) 
 def send_action_email(subject: str, action_url: str, receiver: str) -> bool:
     settings = get_settings()
     if settings.email_preview_enabled and not settings.auth_cookie_secure:
-        logger.warning("development email preview available", extra={"preview_url": action_url})
+        logger.info("development email preview generated", extra={"subject": subject})
+        _record_delivery(subject, receiver, "preview", "previewed")
+        return True
     safe_url = escape(action_url, quote=True)
     body = responsive_email(subject, "Use the secure button below to continue. This link expires automatically.", safe_url, "Continue")
-    return send_alert_email(subject, body, receiver)
+    sent = send_alert_email(subject, body, receiver)
+    _record_delivery(subject, receiver, "resend" if settings.resend_api_key else "smtp", "sent" if sent else "failed")
+    return sent
+
+
+def _record_delivery(template: str, receiver: str, provider: str, status: str) -> None:
+    try:
+        get_db().table("email_deliveries").insert({"template": template[:120],
+            "recipient_hash": hashlib.sha256(receiver.lower().encode()).hexdigest(),
+            "provider": provider, "status": status}).execute()
+    except Exception:
+        logger.exception("email delivery audit failed", extra={"template": template[:120]})
 
 
 TEMPLATES = {

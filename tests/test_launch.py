@@ -18,6 +18,14 @@ def test_phase5_migration_hardens_indexes_rls_and_rate_limits():
     assert "revoke all on function private.consume_rate_limit" in sql
 
 
+def test_phase55_rate_limit_rpc_is_exposed_only_to_service_role():
+    sql = Path("migrations/202608010006_phase55_rate_limit_rpc.sql").read_text(encoding="utf-8")
+    assert "function public.consume_rate_limit" in sql
+    assert "from public, anon, authenticated" in sql
+    assert "to service_role" in sql
+    assert "drop function if exists private.consume_rate_limit" in sql
+
+
 def test_official_sdks_use_sdk_key_header_not_login_jwt():
     node = Path("sdks/node/src/index.ts").read_text(encoding="utf-8")
     python = Path("sdks/python/src/tokenwatch/client.py").read_text(encoding="utf-8")
