@@ -12,6 +12,7 @@ from routers.auth import get_current_user
 from schemas.requests import AlertCreate, UsageLog
 from utils.auth import create_access_token, decode_token
 from utils.encryption import decrypt_api_key, encrypt_api_key
+from services.tenant import TenantContext
 
 
 def test_configuration_validation_rejects_missing_required_values():
@@ -48,6 +49,8 @@ class FakeQuery:
     def insert(self, data): self.inserted = data; return self
     def select(self, *_args, **_kwargs): return self
     def eq(self, *_args): return self
+    def is_(self, *_args): return self
+    def limit(self, *_args): return self
     def order(self, *_args, **_kwargs): return self
     def execute(self):
         if self.inserted:
@@ -58,9 +61,10 @@ class FakeQuery:
 def test_key_create_encrypts_storage_and_returns_only_mask(monkeypatch):
     db = FakeQuery()
     monkeypatch.setattr(keys, "get_db", lambda: db)
+    monkeypatch.setattr(keys, "record_audit", lambda *args, **kwargs: None)
     response = keys.add_key(
         keys.AddKeyRequest(name="Primary", provider="openai", key_value="sk-example-secret-123456"),
-        "user-1",
+        TenantContext("org-1", "user-1", "owner"),
     )
     assert "sk-example-secret" not in db.inserted["encrypted_key"]
     assert response["masked_key"].startswith("sk-e")
@@ -69,10 +73,10 @@ def test_key_create_encrypts_storage_and_returns_only_mask(monkeypatch):
 
 def test_key_list_masks_and_never_exposes_ciphertext(monkeypatch):
     ciphertext = encrypt_api_key("sk-example-secret-123456")
-    row = {"id": "key-1", "key_name": "Primary", "provider": "openai",
+    row = {"id": "key-1", "name": "Primary", "provider": "openai", "is_active": True,
            "encrypted_key": ciphertext, "created_at": "2026-01-01T00:00:00Z"}
     monkeypatch.setattr(keys, "get_db", lambda: FakeQuery([row]))
-    response = keys.list_keys("user-1")
+    response = keys.list_keys(TenantContext("org-1", "user-1", "owner"))
     assert response[0]["masked_key"] == "sk-e••••3456"
     assert "encrypted_key" not in response[0]
 

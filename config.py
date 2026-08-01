@@ -14,6 +14,10 @@ class Settings(BaseModel):
     jwt_secret: str = Field(min_length=32)
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = Field(default=30, ge=1, le=1440)
+    refresh_token_expire_days: int = Field(default=30, ge=1, le=365)
+    auth_cookie_secure: bool = True
+    auth_cookie_domain: str = ""
+    app_base_url: HttpUrl = "http://localhost:3000"
     cors_allowed_origins: tuple[str, ...] = ("http://localhost:3000",)
     smtp_host: str = ""
     smtp_port: int = Field(default=465, ge=1, le=65535)
@@ -60,6 +64,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         jwt_secret=env.get("JWT_SECRET", ""),
         jwt_algorithm=env.get("JWT_ALGORITHM", "HS256"),
         access_token_expire_minutes=env.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"),
+        refresh_token_expire_days=env.get("REFRESH_TOKEN_EXPIRE_DAYS", "30"),
+        auth_cookie_secure=env.get("AUTH_COOKIE_SECURE", "true").lower() in {"1", "true", "yes", "on"},
+        auth_cookie_domain=env.get("AUTH_COOKIE_DOMAIN", ""),
+        app_base_url=env.get("APP_BASE_URL", "http://localhost:3000"),
         cors_allowed_origins=origins,
         smtp_host=env.get("SMTP_HOST", ""),
         smtp_port=env.get("SMTP_PORT") or "465",

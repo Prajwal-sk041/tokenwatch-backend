@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from config import get_settings
 
 
 request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
@@ -41,4 +44,13 @@ async def request_id_middleware(request: Request, call_next):
         return response
     finally:
         request_id_context.reset(token)
+
+
+async def csrf_origin_middleware(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and "tw_access" in request.cookies:
+        origin = request.headers.get("origin")
+        allowed = set(get_settings().cors_allowed_origins)
+        if origin not in allowed:
+            return JSONResponse(status_code=403, content={"detail": "Untrusted request origin"})
+    return await call_next(request)
 

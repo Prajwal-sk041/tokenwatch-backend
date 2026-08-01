@@ -13,6 +13,11 @@ def send_alert_email(subject: str, body_html: str, receiver: str | None = None) 
     if not all([settings.smtp_host, settings.smtp_username, settings.smtp_password, settings.smtp_from_email, receiver]):
         logger.warning("alert email skipped because SMTP is not fully configured")
         return False
+
+
+def send_action_email(subject: str, action_url: str, receiver: str) -> bool:
+    safe_url = escape(action_url, quote=True)
+    return send_alert_email(subject, f'<html><body><p>Use the secure link below to continue:</p><p><a href="{safe_url}">Continue</a></p><p>This link expires automatically.</p></body></html>', receiver)
     try:
         message = MIMEMultipart("alternative")
         message["Subject"], message["From"], message["To"] = subject, settings.smtp_from_email, receiver
