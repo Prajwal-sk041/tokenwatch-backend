@@ -1,223 +1,102 @@
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, date, timezone
-import os
+from datetime import datetime, timezone
+import logging
 
-from supabase import create_client, Client
+from fastapi import APIRouter, Depends, HTTPException
 from routers.auth import get_current_user
+from schemas.requests import AlertCreate
+from utils.database import get_db
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
+logger = logging.getLogger(__name__)
 
-# ── Supabase client ───────────────────────────────────────
-def get_supabase() -> Client:
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
-    return create_client(url, key)
-
-# ── Helper: extract user_id regardless of return type ─────
-def extract_user_id(current_user) -> str:
-    if isinstance(current_user, dict):
-        return str(current_user.get("id") or current_user.get("sub") or current_user.get("user_id"))
-    return str(current_user)
-
-# ── Schemas ───────────────────────────────────────────────
-class AlertCreate(BaseModel):
-    alert_type:   str
-    threshold:    float
-    provider:     Optional[str] = "all"
-    period:       Optional[str] = "daily"
-    notify_email: Optional[str] = None
-
-# ── Helper: compute current usage ─────────────────────────
-def get_current_usage(supabase: Client, user_id: str, provider: str,
-                      alert_type: str, period: str) -> float:
-
-    # ✅ Always use UTC to match Supabase stored timestamps
-    now_utc     = datetime.now(timezone.utc)
-    today       = now_utc.date().isoformat()                    # 2026-05-17 (UTC)
-    month_start = now_utc.date().replace(day=1).isoformat()     # 2026-05-01 (UTC)
-
-    q = (
-        supabase.table("usage_logs")
-        .select("tokens_used, prompt_tokens, completion_tokens, cost, id")
-        .eq("user_id", user_id)
-    )
-
-    if provider and provider != "all":
-        q = q.eq("provider", provider)
-
-    # ✅ Use UTC-aware timestamps
-    if period == "daily":
-        q = q.gte("logged_at", f"{today}T00:00:00+00:00")
-    else:
-        q = q.gte("logged_at", f"{month_start}T00:00:00+00:00")
-
-    rows = q.execute().data or []
-
-    print(f"[ALERTS] Found {len(rows)} rows | user={user_id} | provider={provider} | period={period} | UTC date={today}")
-
+def get_current_usage(db, user_id: str, provider: str, alert_type: str, period: str) -> float:
+    now = datetime.now(timezone.utc)
+    start = now.date() if period == "daily" else now.date().replace(day=1)
+    query = db.table("usage_logs").select("tokens_used,cost,id").eq("user_id", user_id).gte(
+        "logged_at", f"{start.isoformat()}T00:00:00+00:00")
+    if provider != "all":
+        query = query.eq("provider", provider)
+    rows = query.execute().data or []
     if alert_type == "cost":
-        return sum(float(r.get("cost") or 0) for r in rows)
-
-    elif alert_type == "tokens":
-        total = 0
-        for r in rows:
-            if r.get("tokens_used") is not None:
-                total += int(r.get("tokens_used") or 0)
-            else:
-                total += int(r.get("prompt_tokens") or 0) + int(r.get("completion_tokens") or 0)
-        return float(total)
-
-    else:  # requests
-        return float(len(rows))
-
-
-# ── Routes ────────────────────────────────────────────────
+        return sum(float(row.get("cost") or 0) for row in rows)
+    if alert_type == "tokens":
+        return float(sum(int(row.get("tokens_used") or 0) for row in rows))
+    return float(len(rows))
 
 @router.get("/list")
-def list_alerts(current_user=Depends(get_current_user)):
-    supabase = get_supabase()
-    user_id  = extract_user_id(current_user)
-    res = supabase.table("alert_rules") \
-                  .select("*") \
-                  .eq("user_id", user_id) \
-                  .order("created_at", desc=True) \
-                  .execute()
-    return res.data or []
+def list_alerts(user_id: str = Depends(get_current_user)):
+    try:
+        return get_db().table("alert_rules").select("*").eq("user_id", user_id).order("created_at", desc=True).execute().data or []
+    except Exception:
+        logger.exception("alert listing failed")
+        raise HTTPException(status_code=500, detail="Unable to load alerts") from None
 
-@router.post("/create")
-def create_alert(payload: AlertCreate, current_user=Depends(get_current_user)):
-    supabase = get_supabase()
-    user_id  = extract_user_id(current_user)
-
-    valid_types = ["cost", "tokens", "requests"]
-    if payload.alert_type not in valid_types:
-        raise HTTPException(400, f"alert_type must be one of {valid_types}")
-
-    data = {
-        "user_id":      user_id,
-        "alert_type":   payload.alert_type,
-        "threshold":    payload.threshold,
-        "provider":     payload.provider or "all",
-        "period":       payload.period   or "daily",
-        "notify_email": payload.notify_email,
-        "is_active":    True,
-        "created_at":   datetime.now(timezone.utc).isoformat(),
-    }
-    res = supabase.table("alert_rules").insert(data).execute()
-    if not res.data:
-        raise HTTPException(500, "Failed to create alert")
-    return res.data[0]
+@router.post("/create", status_code=201)
+def create_alert(payload: AlertCreate, user_id: str = Depends(get_current_user)):
+    try:
+        record = {"user_id": user_id, "alert_type": payload.alert_type.value,
+                  "threshold": payload.threshold, "provider": payload.provider.value,
+                  "period": payload.period.value,
+                  "notify_email": str(payload.notify_email) if payload.notify_email else None,
+                  "is_active": True, "created_at": datetime.now(timezone.utc).isoformat()}
+        result = get_db().table("alert_rules").insert(record).execute()
+        if not result.data:
+            raise RuntimeError("insert returned no data")
+        return result.data[0]
+    except Exception:
+        logger.exception("alert creation failed")
+        raise HTTPException(status_code=500, detail="Unable to create alert") from None
 
 @router.patch("/toggle/{alert_id}")
-def toggle_alert(alert_id: str, current_user=Depends(get_current_user)):
-    supabase = get_supabase()
-    user_id  = extract_user_id(current_user)
-
-    existing = supabase.table("alert_rules") \
-                       .select("is_active") \
-                       .eq("id", alert_id) \
-                       .eq("user_id", user_id) \
-                       .single() \
-                       .execute()
-    if not existing.data:
-        raise HTTPException(404, "Alert not found")
-
-    new_state = not existing.data["is_active"]
-    supabase.table("alert_rules") \
-            .update({"is_active": new_state}) \
-            .eq("id", alert_id) \
-            .eq("user_id", user_id) \
-            .execute()
-    return {"id": alert_id, "is_active": new_state}
+def toggle_alert(alert_id: str, user_id: str = Depends(get_current_user)):
+    try:
+        db = get_db()
+        existing = db.table("alert_rules").select("is_active").eq("id", alert_id).eq("user_id", user_id).single().execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        new_state = not existing.data["is_active"]
+        db.table("alert_rules").update({"is_active": new_state}).eq("id", alert_id).eq("user_id", user_id).execute()
+        return {"id": alert_id, "is_active": new_state}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("alert toggle failed")
+        raise HTTPException(status_code=500, detail="Unable to update alert") from None
 
 @router.delete("/delete/{alert_id}")
-def delete_alert(alert_id: str, current_user=Depends(get_current_user)):
-    supabase = get_supabase()
-    user_id  = extract_user_id(current_user)
-    supabase.table("alert_rules") \
-            .delete() \
-            .eq("id", alert_id) \
-            .eq("user_id", user_id) \
-            .execute()
-    return {"message": "Alert deleted"}
+def delete_alert(alert_id: str, user_id: str = Depends(get_current_user)):
+    try:
+        get_db().table("alert_rules").delete().eq("id", alert_id).eq("user_id", user_id).execute()
+        return {"message": "Alert deleted"}
+    except Exception:
+        logger.exception("alert deletion failed")
+        raise HTTPException(status_code=500, detail="Unable to delete alert") from None
 
 @router.get("/history")
-def get_history(current_user=Depends(get_current_user)):
-    supabase = get_supabase()
-    user_id  = extract_user_id(current_user)
-    res = supabase.table("alert_history") \
-                  .select("*") \
-                  .eq("user_id", user_id) \
-                  .order("triggered_at", desc=True) \
-                  .limit(50) \
-                  .execute()
-    return res.data or []
+def get_history(user_id: str = Depends(get_current_user)):
+    try:
+        return get_db().table("alert_history").select("*").eq("user_id", user_id).order("triggered_at", desc=True).limit(50).execute().data or []
+    except Exception:
+        logger.exception("alert history failed")
+        raise HTTPException(status_code=500, detail="Unable to load alert history") from None
 
-# ── Scheduler checker ─────────────────────────────────────
 def check_alerts_for_all_users():
-    from utils.email import send_alert_email, build_alert_email
-
-    supabase = get_supabase()
-    today    = date.today().isoformat()
-
-    rules = supabase.table("alert_rules") \
-                    .select("*") \
-                    .eq("is_active", True) \
-                    .execute().data or []
-
-    print(f"[ALERTS] 🔍 Checking {len(rules)} active rule(s)...")
-
+    from utils.email import build_alert_email, send_alert_email
+    db = get_db()
+    today = datetime.now(timezone.utc).date().isoformat()
+    rules = db.table("alert_rules").select("*").eq("is_active", True).execute().data or []
     for rule in rules:
-        user_id    = str(rule["user_id"])
-        alert_type = rule["alert_type"]
-        threshold  = float(rule["threshold"])
-        provider   = rule.get("provider", "all")
-        period     = rule.get("period",   "daily")
-
-        current_val = get_current_usage(supabase, user_id, provider, alert_type, period)
-        print(f"[ALERTS] 📊 {provider} | {alert_type} | {period} → {current_val} / {threshold}")
-
-        if current_val < threshold * 0.8:
-            print(f"[ALERTS] ⏭ Below 80% threshold — skipping")
+        current = get_current_usage(db, str(rule["user_id"]), rule.get("provider", "all"), rule["alert_type"], rule["period"])
+        threshold = float(rule["threshold"])
+        if current < threshold * 0.8:
             continue
-
-        # Avoid duplicate alerts same day
-        dup = supabase.table("alert_history") \
-                      .select("id") \
-                      .eq("rule_id", rule["id"]) \
-                      .gte("triggered_at", f"{today}T00:00:00") \
-                      .execute()
-        if dup.data:
-            print(f"[ALERTS] ⏭ Already alerted today — skipping")
+        duplicate = db.table("alert_history").select("id").eq("rule_id", rule["id"]).gte("triggered_at", f"{today}T00:00:00+00:00").execute()
+        if duplicate.data:
             continue
-
-        unit         = "$" if alert_type == "cost" else ""
-        period_label = f"Today ({today})" if period == "daily" \
-                       else f"This Month ({date.today().strftime('%B %Y')})"
-
-        subject, body = build_alert_email(
-            alert_type  = f"{period.title()} {alert_type.title()}",
-            provider    = provider,
-            current_val = current_val,
-            limit_val   = threshold,
-            unit        = unit,
-            period      = period_label,
-        )
-
-        receiver   = rule.get("notify_email") or os.getenv("ALERT_RECEIVER")
-        email_sent = send_alert_email(subject, body, receiver)
-
-        supabase.table("alert_history").insert({
-            "rule_id":      rule["id"],
-            "user_id":      user_id,
-            "provider":     provider,
-            "alert_type":   alert_type,
-            "current_val":  current_val,
-            "threshold":    threshold,
-            "email_sent":   email_sent,
-            "triggered_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
-
-        print(f"[ALERTS] ✅ Email sent → {provider} {alert_type}: {current_val} / {threshold}")
+        subject, body = build_alert_email(rule["alert_type"], rule.get("provider", "all"), current, threshold,
+                                          "$" if rule["alert_type"] == "cost" else "", rule["period"])
+        sent = send_alert_email(subject, body, rule.get("notify_email"))
+        db.table("alert_history").insert({"rule_id": rule["id"], "user_id": str(rule["user_id"]),
+            "provider": rule.get("provider", "all"), "alert_type": rule["alert_type"],
+            "current_val": current, "threshold": threshold, "email_sent": sent,
+            "triggered_at": datetime.now(timezone.utc).isoformat()}).execute()

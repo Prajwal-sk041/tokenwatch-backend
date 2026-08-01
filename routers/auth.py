@@ -1,101 +1,87 @@
-from fastapi import APIRouter, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
+
+from schemas.requests import LoginRequest, RegisterRequest
+from utils.auth import create_access_token, decode_token, hash_password, verify_password
 from utils.database import get_db
-from utils.auth import hash_password, verify_password, create_access_token, decode_token
+
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
 security = HTTPBearer()
+logger = logging.getLogger(__name__)
 
-# --- Schemas ---
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    full_name: str = ""
 
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-# --- Helper: Get current user from token ---
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     try:
-        token = credentials.credentials.strip().strip('"').strip("'")
-        print(f"DEBUG TOKEN: {token[:50]}...")
-        payload = decode_token(token)
-        print(f"DEBUG PAYLOAD: {payload}")
+        payload = decode_token(credentials.credentials)
         user_id = payload.get("sub")
         if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token - no sub field")
-        return user_id
+            raise JWTError("missing subject")
+        return str(user_id)
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
+
+
+@router.post("/register", status_code=201)
+def register(data: RegisterRequest):
+    try:
+        db = get_db()
+        email = str(data.email).lower()
+        if db.table("users").select("id").eq("email", email).execute().data:
+            raise HTTPException(status_code=409, detail="Email already registered")
+        result = db.table("users").insert(
+            {"email": email, "hashed_password": hash_password(data.password), "full_name": data.full_name}
+        ).execute()
+        return {"message": "User registered successfully", "user_id": result.data[0]["id"], "email": email}
     except HTTPException:
         raise
-    except Exception as e:
-        print(f"DEBUG ERROR: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token error: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+    except Exception:
+        logger.exception("registration failed")
+        raise HTTPException(status_code=500, detail="Unable to register user") from None
 
-# --- Register ---
-@router.post("/register")
-def register(data: RegisterRequest):
-    db = get_db()
-    existing = db.table("users").select("id").eq("email", data.email).execute()
-    if existing.data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    hashed = hash_password(data.password)
-    result = db.table("users").insert({
-        "email": data.email,
-        "hashed_password": hashed,
-        "full_name": data.full_name
-    }).execute()
-    return {
-        "message": "User registered successfully! 🎉",
-        "user_id": result.data[0]["id"],
-        "email": data.email
-    }
 
-# --- Login ---
 @router.post("/login")
 def login(data: LoginRequest):
-    db = get_db()
-    result = db.table("users").select("*").eq("email", data.email).execute()
-    if not result.data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-    user = result.data[0]
-    if not verify_password(data.password, user["hashed_password"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-    token = create_access_token({"sub": user["id"], "email": user["email"]})
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user_id": user["id"],
-        "email": user["email"],
-        "full_name": user["full_name"]
-    }
+    try:
+        email = str(data.email).lower()
+        result = get_db().table("users").select("*").eq("email", email).execute()
+        if not result.data or not verify_password(data.password, result.data[0]["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        user = result.data[0]
+        if not user.get("is_active", True):
+            raise HTTPException(status_code=403, detail="Account is inactive")
+        return {
+            "access_token": create_access_token({"sub": user["id"], "email": user["email"]}),
+            "token_type": "bearer",
+            "user_id": user["id"],
+            "email": user["email"],
+            "full_name": user.get("full_name", ""),
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("login failed")
+        raise HTTPException(status_code=500, detail="Unable to sign in") from None
 
-# --- Get Current User (Protected) ---
+
 @router.get("/me")
 def get_me(user_id: str = Depends(get_current_user)):
-    db = get_db()
-    result = db.table("users").select(
-        "id, email, full_name, plan, is_active, created_at"
-    ).eq("id", user_id).single().execute()
-    if not result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    return result.data
+    try:
+        result = get_db().table("users").select(
+            "id, email, full_name, plan, is_active, created_at"
+        ).eq("id", user_id).single().execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="User not found")
+        return result.data
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("user lookup failed")
+        raise HTTPException(status_code=500, detail="Unable to load user") from None

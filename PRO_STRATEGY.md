@@ -1,22 +1,19 @@
-IyBUb2tlbldhdGNoIFBybyBTdHJhdGVneQoKVXNpbmcgVG9rZW5XYXRjaCBh
-cyBhICJQbGF0Zm9ybSIgcmF0aGVyIHRoYW4ganVzdCBhIHRyYWNrZXIgaXMg
-aG93IHdlIGhpdCAyIExha2gvbW9udGguCgojIyAxLiBJbnRlZ3JhdGlvbiBT
-bmlwcGV0IChQeXRob24pCmBgYHB5dGhvbgppbXBvcnQgcmVxdWVzdHMKCmRl
-ZiBsb2dfdXNhZ2UodXNhZ2UsIG1vZGVsLCBwcm92aWRlcj0ib3BlbmFpIik6
-CiAgICByZXF1ZXN0cy5wb3N0KAogICAgICAgICJodHRwczovL3Rva2Vud2F0
-Y2gtYmFja2VuZC52ZXJjZWwuYXBwL3VzYWdlL2xvZyIsCiAgICAgICAganNv
-bj17CiAgICAgICAgICAgICJwcm92aWRlciI6IHByb3ZpZGVyLAogICAgICAg
-ICAgICAibW9kZWwiOiBtb2RlbCwKICAgICAgICAgICAgInByb21wdF90b2tl
-bnMiOiB1c2FnZS5wcm9tcHRfdG9rZW5zLAogICAgICAgICAgICAiY29tcGxl
-dGlvbl90b2tlbnMiOiB1c2FnZS5jb21wbGV0aW9uX3Rva2VucwogICAgICAg
-IH0sCiAgICAgICAgaGVhZGVycz17IkF1dGhvcml6YXRpb24iOiAiQmVhcmVy
-IFlPVV9UT0tFTldBVENIX0tFWSJ9CiAgICApCmBgYAoKIyMgMi4gVGhlICJL
-aWxsIFN3aXRjaCIgKFBybyBGZWF0dXJlKQpXZSBuZWVkIGFuIGVuZHBvaW50
-IHRoYXQgcmV0dXJucyBhIGJvb2xlYW46IGBzY291bGRfYmxvY2tgLgpBSSBB
-Z2VudHMgcnVubmluZyBpbiB0aGUgYmFja2dyb3VuZCBuZWVkIHRoaXMgdG8g
-c3RvcCBhdXRvbWF0aWNhbGx5IHdoZW4gdGhlIGJ1ZGdldCBpcyBoaXQuCgoj
-IyAzLiBQcmNpbmcgTW9kZWwKLSBGcmVlOiBCYXNpYyB0cmFja2luZyAoMTBL
-IGxvZ3MpCi0gUHJvICgkMjkvc2VhdCk6IFJlYWwtdGltZSBraWxsLXN3aXRj
-aGVzLCBwZXItdXNlciBhdHRyaWJ1dGlvbiwgZW1haWwgYWxlcnRzLgotIEVu
-dGVycHJpc2U6IEN1c3RvbSBmb3JlY2FzdGluZyArIFNsYWNrIGFsZXJ0cy4K
-Cj09PQpUaGlzIGlzIHRoZSByb2FkbWFwIHRvIDIgbGFraC9tb250aC4=
+# TokenWatch Pro Strategy
+
+TokenWatch can evolve from a tracker into a platform after the secure foundation is complete.
+
+## Integration SDK
+
+A future SDK should submit normalized provider usage to a scoped TokenWatch ingestion endpoint. It must use a dedicated, revocable ingestion credential rather than a dashboard login token.
+
+## Budget enforcement
+
+A future enforcement endpoint can return whether a workload should be blocked after a configured budget is reached. This is explicitly outside Phase 1A.
+
+## Potential pricing model
+
+- Free: basic tracking with a limited event allowance.
+- Pro: budget enforcement, attribution, and alert delivery.
+- Enterprise: advanced forecasting and additional alert channels.
+
+Billing and plan enforcement are intentionally deferred until the security, database, and ingestion foundations are production-ready.

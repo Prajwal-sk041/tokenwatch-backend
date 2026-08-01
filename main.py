@@ -1,38 +1,49 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
+import logging
 
-load_dotenv()
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
-from routers import auth, keys, usage, alerts
+from config import get_settings
+from logging_config import configure_logging, request_id_middleware
+from routers import alerts, auth, keys, usage
+from utils.database import check_database_connection
 
-scheduler_instance = None
+
+configure_logging()
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global scheduler_instance
-    from scheduler import start_scheduler
-    scheduler_instance = start_scheduler()
-    yield
-    if scheduler_instance:
-        scheduler_instance.shutdown(wait=False)
-        print("[SCHEDULER] 🛑 Stopped")
+    settings = get_settings()
+    scheduler = None
+    if settings.alert_scheduler_enabled:
+        from scheduler import start_scheduler
 
+        scheduler = start_scheduler()
+        logger.info("alert scheduler started")
+    yield
+    if scheduler:
+        scheduler.shutdown(wait=False)
+        logger.info("alert scheduler stopped")
+
+
+settings = get_settings()
 app = FastAPI(
     title="TokenWatch API",
-    description="AI-powered API token usage monitor",
+    description="API token usage monitor",
     version="1.0.0",
-    swagger_ui_parameters={"persistAuthorization": True},
+    swagger_ui_parameters={"persistAuthorization": False},
     lifespan=lifespan,
 )
-
+app.middleware("http")(request_id_middleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(settings.cors_allowed_origins),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 app.include_router(auth.router)
@@ -40,12 +51,19 @@ app.include_router(keys.router)
 app.include_router(usage.router)
 app.include_router(alerts.router)
 
+
 @app.get("/")
 def root():
-    return {"message": "TokenWatch API is running 🚀"}
+    return {"message": "TokenWatch API is running"}
 
-@app.get("/test-alerts")
-def test_alerts():
-    from routers.alerts import check_alerts_for_all_users
-    check_alerts_for_all_users()
-    return {"message": "✅ Alert check triggered! Check your email."}
+
+@app.get("/health/live", tags=["Health"])
+def health_live():
+    return {"status": "ok"}
+
+
+@app.get("/health/ready", tags=["Health"])
+def health_ready():
+    if not check_database_connection():
+        raise HTTPException(status_code=503, detail="Service is not ready")
+    return {"status": "ready"}

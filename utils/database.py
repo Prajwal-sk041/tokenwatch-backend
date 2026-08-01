@@ -1,20 +1,19 @@
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
+from functools import lru_cache
 
-# Hardcoded absolute path — guaranteed to work
-load_dotenv(dotenv_path=r"C:\SaaS Product\TokenWatch\backend\.env")
+from supabase import Client, create_client
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+from config import get_settings
 
-print(f"DEBUG - URL loaded: {bool(SUPABASE_URL)}")
-print(f"DEBUG - KEY loaded: {bool(SUPABASE_KEY)}")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("❌ SUPABASE_URL or SUPABASE_SERVICE_KEY not found in .env!")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
+@lru_cache
 def get_db() -> Client:
-    return supabase
+    settings = get_settings()
+    return create_client(str(settings.supabase_url).rstrip("/"), settings.supabase_service_key)
+
+
+def check_database_connection() -> bool:
+    try:
+        get_db().table("users").select("id", count="exact").limit(1).execute()
+        return True
+    except Exception:
+        return False
