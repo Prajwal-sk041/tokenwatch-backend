@@ -80,6 +80,16 @@ def verify_email(data: TokenActionRequest):
     return {"message": "Email verified"}
 
 
+@router.post("/verify-email/resend", status_code=202)
+def resend_verification(data: PasswordResetRequest):
+    rows = get_db().table("users").select("id,email,email_verified_at").eq("email", str(data.email).lower()).eq("is_active", True).is_("deleted_at", "null").limit(1).execute().data or []
+    if rows and not rows[0].get("email_verified_at"):
+        token = generate_opaque_token("twv_")
+        get_db().table("auth_action_tokens").insert({"user_id": rows[0]["id"], "token_hash": hash_secret(token), "purpose": "verify_email", "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()}).execute()
+        send_action_email("Verify your TokenWatch email", f"{str(get_settings().app_base_url).rstrip('/')}/verify-email?token={token}", rows[0]["email"])
+    return {"message": "If verification is pending, a new message was requested"}
+
+
 @router.post("/login")
 def login(data: LoginRequest, request: Request, response: Response):
     rows = get_db().table("users").select("*").eq("email", str(data.email).lower()).is_("deleted_at", "null").limit(1).execute().data or []

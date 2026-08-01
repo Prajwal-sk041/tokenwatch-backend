@@ -167,3 +167,43 @@ class AlertCreate(StrictModel):
 class SubscriptionChange(StrictModel):
     plan_code: str = Field(min_length=1, max_length=50, pattern=r"^[a-z0-9_-]+$")
 
+
+class OnboardingUpdate(StrictModel):
+    current_step: int = Field(ge=1, le=11)
+    completed_steps: list[int] = Field(default_factory=list, max_length=11)
+    integration_type: str | None = Field(default=None, pattern=r"^(python|node|rest)$")
+    provider: Provider | None = None
+    completed: bool = False
+    skipped: bool = False
+
+    @field_validator("completed_steps")
+    @classmethod
+    def valid_steps(cls, value: list[int]) -> list[int]:
+        if any(step < 1 or step > 11 for step in value):
+            raise ValueError("completed_steps must contain values from 1 through 11")
+        return sorted(set(value))
+
+
+class OnboardingTestEvent(StrictModel):
+    sdk_key: str = Field(min_length=24, max_length=512)
+    provider: Provider
+    model: str = Field(min_length=1, max_length=120)
+
+
+class BudgetPolicyUpdate(StrictModel):
+    amount: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    warning_threshold_percent: float | None = Field(default=None, ge=0, le=100)
+    hard_stop_threshold_percent: float | None = Field(default=None, ge=0, le=100)
+    action: str | None = Field(default=None, pattern=r"^(allow|warn|block|log)$")
+    is_active: bool | None = None
+
+
+class MemberRoleUpdate(StrictModel):
+    role: str = Field(pattern=r"^(admin|member|viewer)$")
+
+
+class AlertUpdate(StrictModel):
+    threshold: float | None = Field(default=None, gt=0, le=1_000_000_000)
+    is_active: bool | None = None
+    destination: str | None = Field(default=None, max_length=2048)
+

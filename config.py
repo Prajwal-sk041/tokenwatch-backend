@@ -24,6 +24,7 @@ class Settings(BaseModel):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
+    email_preview_enabled: bool = False
     alert_scheduler_enabled: bool = False
     api_key_encryption_key: str
 
@@ -74,6 +75,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         smtp_username=env.get("SMTP_USERNAME", ""),
         smtp_password=env.get("SMTP_PASSWORD", ""),
         smtp_from_email=env.get("SMTP_FROM_EMAIL", ""),
+        email_preview_enabled=env.get("EMAIL_PREVIEW_ENABLED", "false").lower() in {"1", "true", "yes", "on"},
         alert_scheduler_enabled=env.get("ALERT_SCHEDULER_ENABLED", "false").lower()
         in {"1", "true", "yes", "on"},
         api_key_encryption_key=env.get("API_KEY_ENCRYPTION_KEY", ""),

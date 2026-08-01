@@ -4,20 +4,18 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
+
 from config import get_settings
 
+
 logger = logging.getLogger(__name__)
+
 
 def send_alert_email(subject: str, body_html: str, receiver: str | None = None) -> bool:
     settings = get_settings()
     if not all([settings.smtp_host, settings.smtp_username, settings.smtp_password, settings.smtp_from_email, receiver]):
-        logger.warning("alert email skipped because SMTP is not fully configured")
+        logger.warning("email delivery unavailable", extra={"delivery_channel": "smtp"})
         return False
-
-
-def send_action_email(subject: str, action_url: str, receiver: str) -> bool:
-    safe_url = escape(action_url, quote=True)
-    return send_alert_email(subject, f'<html><body><p>Use the secure link below to continue:</p><p><a href="{safe_url}">Continue</a></p><p>This link expires automatically.</p></body></html>', receiver)
     try:
         message = MIMEMultipart("alternative")
         message["Subject"], message["From"], message["To"] = subject, settings.smtp_from_email, receiver
@@ -25,11 +23,21 @@ def send_action_email(subject: str, action_url: str, receiver: str) -> bool:
         with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port) as server:
             server.login(settings.smtp_username, settings.smtp_password)
             server.sendmail(settings.smtp_from_email, receiver, message.as_string())
-        logger.info("alert email sent")
+        logger.info("email delivery succeeded", extra={"delivery_channel": "smtp"})
         return True
     except Exception:
-        logger.exception("alert email failed")
+        logger.exception("email delivery failed", extra={"delivery_channel": "smtp"})
         return False
+
+
+def send_action_email(subject: str, action_url: str, receiver: str) -> bool:
+    settings = get_settings()
+    if settings.email_preview_enabled and not settings.auth_cookie_secure:
+        logger.warning("development email preview available", extra={"preview_url": action_url})
+    safe_url = escape(action_url, quote=True)
+    body = f'<html><body><p>Use the secure link below to continue:</p><p><a href="{safe_url}">Continue</a></p><p>This link expires automatically.</p></body></html>'
+    return send_alert_email(subject, body, receiver)
+
 
 def build_alert_email(alert_type: str, provider: str, current_val: float, limit_val: float, unit: str, period: str) -> tuple[str, str]:
     safe_provider, safe_type, safe_period = escape(provider.capitalize()), escape(alert_type.title()), escape(period)
