@@ -171,10 +171,19 @@ class SubscriptionChange(StrictModel):
 class CheckoutCreate(StrictModel):
     plan_code: str = Field(pattern=r"^(starter|pro|team)$")
     billing_interval: str = Field(default="month", pattern=r"^(month|year)$")
+    coupon_code: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class PortalCreate(StrictModel):
     return_path: str = Field(default="/dashboard/billing", pattern=r"^/[A-Za-z0-9/_-]*$")
+
+
+class SupportTicketCreate(StrictModel):
+    category: str = Field(pattern=r"^(support|billing|bug|feedback|security)$")
+    subject: str = Field(min_length=3, max_length=160)
+    message: str = Field(min_length=10, max_length=10000)
+    page_url: str | None = Field(default=None, max_length=2048)
+    email: EmailStr | None = None
 
 
 class OnboardingUpdate(StrictModel):

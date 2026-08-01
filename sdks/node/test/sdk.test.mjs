@@ -1,0 +1,1 @@
+import assert from"node:assert/strict";import test from"node:test";import{readFileSync}from"node:fs";test("SDK never accepts login tokens",()=>{const s=readFileSync(new URL("../src/index.ts",import.meta.url),"utf8");assert.match(s,/tw_live_/);assert.match(s,/x-tokenwatch-key/);assert.doesNotMatch(s,/authorization.*bearer/i)});

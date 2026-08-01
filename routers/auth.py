@@ -9,9 +9,10 @@ from dependencies import Principal, get_principal
 from schemas.requests import LoginRequest, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, TokenActionRequest
 from services.audit import record_audit
 from services.security import create_access_token, generate_opaque_token, hash_secret
+from services.rate_limit import consume
 from utils.auth import hash_password, verify_password
 from utils.database import get_db
-from utils.email import send_action_email
+from utils.email import send_action_email, send_template_email
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -52,7 +53,8 @@ def _issue_session(user: dict, request: Request, response: Response, family_id: 
 
 
 @router.post("/register", status_code=201)
-def register(data: RegisterRequest):
+def register(data: RegisterRequest, request: Request):
+    consume(request, "auth.register", 5, 3600)
     db = get_db()
     email = str(data.email).lower()
     if db.table("users").select("id").eq("email", email).is_("deleted_at", "null").execute().data:
@@ -77,11 +79,14 @@ def verify_email(data: TokenActionRequest):
     get_db().table("auth_action_tokens").update({"consumed_at": now}).eq("id", rows[0]["id"]).execute()
     get_db().table("users").update({"email_verified_at": now}).eq("id", rows[0]["user_id"]).execute()
     record_audit("account.email_verified", actor_user_id=str(rows[0]["user_id"]), target_type="user", target_id=str(rows[0]["user_id"]))
+    orgs = get_db().table("organizations").select("id").eq("owner_user_id", rows[0]["user_id"]).limit(1).execute().data or []
+    if orgs: send_template_email("welcome", str(orgs[0]["id"]))
     return {"message": "Email verified"}
 
 
 @router.post("/verify-email/resend", status_code=202)
-def resend_verification(data: PasswordResetRequest):
+def resend_verification(data: PasswordResetRequest, request: Request):
+    consume(request, "auth.verify_resend", 5, 3600)
     rows = get_db().table("users").select("id,email,email_verified_at").eq("email", str(data.email).lower()).eq("is_active", True).is_("deleted_at", "null").limit(1).execute().data or []
     if rows and not rows[0].get("email_verified_at"):
         token = generate_opaque_token("twv_")
@@ -92,6 +97,7 @@ def resend_verification(data: PasswordResetRequest):
 
 @router.post("/login")
 def login(data: LoginRequest, request: Request, response: Response):
+    consume(request, "auth.login", 10, 900)
     rows = get_db().table("users").select("*").eq("email", str(data.email).lower()).is_("deleted_at", "null").limit(1).execute().data or []
     if not rows or not verify_password(data.password, rows[0]["hashed_password"]):
         record_audit("auth.login_failed", metadata={"email_hash": hash_secret(str(data.email).lower())})
@@ -109,6 +115,7 @@ def login(data: LoginRequest, request: Request, response: Response):
 
 @router.post("/refresh")
 def refresh(request: Request, response: Response, tw_refresh: str | None = Cookie(default=None)):
+    consume(request, "auth.refresh", 60, 900)
     if not tw_refresh:
         raise HTTPException(status_code=401, detail="Refresh token required")
     now = datetime.now(timezone.utc).isoformat()
@@ -147,7 +154,8 @@ def revoke_session(session_id: str, principal: Principal = Depends(get_principal
 
 
 @router.post("/password-reset/request", status_code=202)
-def request_password_reset(data: PasswordResetRequest):
+def request_password_reset(data: PasswordResetRequest, request: Request):
+    consume(request, "auth.password_reset", 5, 3600)
     rows = get_db().table("users").select("id").eq("email", str(data.email).lower()).eq("is_active", True).is_("deleted_at", "null").limit(1).execute().data or []
     if rows:
         token = generate_opaque_token("twp_")

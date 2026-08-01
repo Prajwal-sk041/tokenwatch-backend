@@ -5,11 +5,11 @@ requires-python = ">=3.12"
 dependencies = [
     "APScheduler==3.11.2",
     "bcrypt==5.0.0",
-    "cryptography==48.0.0",
+    "cryptography==48.0.1",
     "email-validator==2.3.0",
     "fastapi==0.136.1",
     "pydantic==2.13.4",
-    "python-jose==3.5.0",
+    "PyJWT==2.13.0",
     "requests==2.33.1",
     "resend==2.19.0",
     "sentry-sdk[fastapi]==2.35.0",

@@ -26,6 +26,8 @@ class BillingProvider(ABC):
     def verify_webhook(self, payload: bytes, signature: str) -> dict[str, Any]: ...
     @abstractmethod
     def provision_plan(self, plan: dict[str, Any]) -> dict[str, str]: ...
+    @abstractmethod
+    def resume_subscription(self, subscription_id: str) -> None: ...
 
 
 class StripeProvider(BillingProvider):
@@ -33,13 +35,15 @@ class StripeProvider(BillingProvider):
         settings = get_settings()
         if not settings.stripe_secret_key:
             raise HTTPException(status_code=503, detail="Billing is not configured")
+        expected_prefix = "sk_live_" if settings.stripe_environment == "live" else "sk_test_"
+        if not settings.stripe_secret_key.startswith(expected_prefix):
+            raise HTTPException(status_code=503, detail="Billing environment configuration is inconsistent")
         stripe.api_key = settings.stripe_secret_key
         self.settings = settings
 
-    def create_checkout(self, *, customer_id: str | None, customer_email: str, organization_id: str, plan: dict, interval: str) -> str:
-        price_id = plan.get("stripe_price_id")
-        if interval == "year":
-            price_id = (plan.get("features") or {}).get("stripe_annual_price_id")
+    def create_checkout(self, *, customer_id: str | None, customer_email: str, organization_id: str, plan: dict, interval: str, coupon_code: str | None = None) -> str:
+        prefix = f"stripe_{self.settings.stripe_environment}_"
+        price_id = plan.get(prefix + ("annual_price_id" if interval == "year" else "monthly_price_id"))
         if not price_id:
             raise HTTPException(status_code=503, detail="Selected plan price is not configured")
         params: dict[str, Any] = {
@@ -50,12 +54,17 @@ class StripeProvider(BillingProvider):
             "metadata": {"organization_id": organization_id, "plan_code": plan["code"]},
             "subscription_data": {"trial_period_days": 14, "metadata": {"organization_id": organization_id, "plan_code": plan["code"]}},
             "automatic_tax": {"enabled": self.settings.stripe_tax_enabled},
-            "allow_promotion_codes": True,
+            "allow_promotion_codes": coupon_code is None,
         }
         params["customer"] = customer_id if customer_id else None
         if not customer_id:
             params.pop("customer")
             params["customer_email"] = customer_email
+        if coupon_code:
+            promotions = stripe.PromotionCode.list(code=coupon_code, active=True, limit=1)
+            if not promotions.data:
+                raise HTTPException(status_code=422, detail="Coupon is invalid or expired")
+            params["discounts"] = [{"promotion_code": promotions.data[0].id}]
         session = stripe.checkout.Session.create(**params)
         if not session.url:
             raise HTTPException(status_code=502, detail="Billing provider returned no checkout URL")
@@ -69,22 +78,29 @@ class StripeProvider(BillingProvider):
         if not self.settings.stripe_webhook_secret:
             raise HTTPException(status_code=503, detail="Billing webhook is not configured")
         try:
-            return stripe.Webhook.construct_event(payload, signature, self.settings.stripe_webhook_secret)
+            event = stripe.Webhook.construct_event(payload, signature, self.settings.stripe_webhook_secret, tolerance=300)
+            if bool(event.get("livemode")) != (self.settings.stripe_environment == "live"):
+                raise HTTPException(status_code=400, detail="Webhook environment mismatch")
+            return event
         except (ValueError, stripe.error.SignatureVerificationError) as exc:
             raise HTTPException(status_code=400, detail="Invalid webhook signature") from exc
 
     def provision_plan(self, plan: dict[str, Any]) -> dict[str, str]:
-        product_id = plan.get("stripe_product_id")
+        prefix = f"stripe_{self.settings.stripe_environment}_"
+        product_id = plan.get(prefix + "product_id")
         if not product_id:
             product = stripe.Product.create(name=f"TokenWatch {plan['name']}", description=plan.get("description"), metadata={"plan_code": plan["code"]})
             product_id = product.id
-        monthly_id = plan.get("stripe_price_id")
+        monthly_id = plan.get(prefix + "monthly_price_id")
         if not monthly_id:
             monthly_id = stripe.Price.create(product=product_id, currency="usd", unit_amount=int(float(plan["monthly_price"]) * 100), recurring={"interval": "month"}, metadata={"plan_code": plan["code"]}).id
-        annual_id = (plan.get("features") or {}).get("stripe_annual_price_id")
+        annual_id = plan.get(prefix + "annual_price_id")
         if not annual_id:
             annual_id = stripe.Price.create(product=product_id, currency="usd", unit_amount=int(float(plan["annual_price"]) * 100), recurring={"interval": "year"}, metadata={"plan_code": plan["code"]}).id
         return {"product_id": product_id, "monthly_price_id": monthly_id, "annual_price_id": annual_id}
+
+    def resume_subscription(self, subscription_id: str) -> None:
+        stripe.Subscription.modify(subscription_id, cancel_at_period_end=False)
 
 
 class BillingService:
@@ -97,13 +113,13 @@ class BillingService:
     def provider(self) -> BillingProvider:
         return StripeProvider()
 
-    def checkout(self, organization_id: str, user_email: str, plan_code: str, interval: str) -> str:
+    def checkout(self, organization_id: str, user_email: str, plan_code: str, interval: str, coupon_code: str | None = None) -> str:
         plan = plan_service.by_code(plan_code)
         rows = get_db().table("subscriptions").select("provider_customer_id,status").eq("organization_id", organization_id).is_("deleted_at", "null").order("created_at", desc=True).limit(1).execute().data or []
         if rows and rows[0].get("status") in {"trialing", "active", "past_due", "unpaid", "paused"}:
             raise HTTPException(status_code=409, detail="Manage the existing subscription in the billing portal")
         customer_id = rows[0].get("provider_customer_id") if rows else None
-        return self.provider().create_checkout(customer_id=customer_id, customer_email=user_email, organization_id=organization_id, plan=plan, interval=interval)
+        return self.provider().create_checkout(customer_id=customer_id, customer_email=user_email, organization_id=organization_id, plan=plan, interval=interval, coupon_code=coupon_code)
 
     def portal(self, organization_id: str, return_path: str) -> str:
         rows = get_db().table("subscriptions").select("provider_customer_id").eq("organization_id", organization_id).is_("deleted_at", "null").limit(1).execute().data or []
@@ -116,14 +132,22 @@ class BillingService:
         for code in ("starter", "pro", "team"):
             plan = plan_service.by_code(code)
             ids = self.provider().provision_plan(plan)
-            features = {**(plan.get("features") or {}), "stripe_annual_price_id": ids["annual_price_id"]}
-            get_db().table("plans").update({"stripe_product_id": ids["product_id"], "stripe_price_id": ids["monthly_price_id"], "features": features}).eq("id", plan["id"]).execute()
+            prefix = f"stripe_{get_settings().stripe_environment}_"
+            get_db().table("plans").update({prefix+"product_id": ids["product_id"], prefix+"monthly_price_id": ids["monthly_price_id"], prefix+"annual_price_id": ids["annual_price_id"]}).eq("id", plan["id"]).execute()
             configured.append({"plan": code, **ids})
         return configured
 
+    def resume(self, organization_id: str) -> None:
+        rows = get_db().table("subscriptions").select("provider_subscription_id,status").eq("organization_id", organization_id).eq("provider", "stripe").is_("deleted_at", "null").order("created_at", desc=True).limit(1).execute().data or []
+        if not rows or not rows[0].get("provider_subscription_id"):
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        if rows[0].get("status") not in {"active", "trialing", "paused", "past_due"}:
+            raise HTTPException(status_code=409, detail="Subscription cannot be resumed")
+        self.provider().resume_subscription(rows[0]["provider_subscription_id"])
+
     def process_webhook(self, event: dict[str, Any]) -> str:
         event_id, event_type = event["id"], event["type"]
-        existing = get_db().table("billing_events").select("status").eq("provider", "stripe").eq("provider_event_id", event_id).limit(1).execute().data or []
+        existing = get_db().table("billing_events").select("status,attempts").eq("provider", "stripe").eq("provider_event_id", event_id).limit(1).execute().data or []
         if existing and existing[0]["status"] == "processed":
             return "duplicate"
         obj = event["data"]["object"]
@@ -131,12 +155,14 @@ class BillingService:
         if not existing:
             payload = event.to_dict_recursive() if hasattr(event, "to_dict_recursive") else dict(event)
             try:
-                get_db().table("billing_events").insert({"provider": "stripe", "provider_event_id": event_id, "event_type": event_type, "organization_id": organization_id, "payload": payload}).execute()
+                get_db().table("billing_events").insert({"provider": "stripe", "provider_event_id": event_id, "event_type": event_type, "organization_id": organization_id, "payload": payload, "livemode": bool(event.get("livemode")), "request_id": (event.get("request") or {}).get("id") if isinstance(event.get("request"), dict) else event.get("request")}).execute()
             except Exception:
                 raced = get_db().table("billing_events").select("status").eq("provider", "stripe").eq("provider_event_id", event_id).limit(1).execute().data or []
                 if raced:
                     return "duplicate"
                 raise
+        elif existing:
+            get_db().table("billing_events").update({"attempts": int(existing[0].get("attempts") or 1) + 1}).eq("provider_event_id", event_id).eq("provider", "stripe").execute()
         try:
             if event_type not in self.handled_events:
                 status = "ignored"
@@ -161,6 +187,9 @@ class BillingService:
             if resolved_org: send_template_email("trial_ending", resolved_org)
         elif event_type.startswith("customer.subscription."):
             self._sync_subscription(obj, organization_id)
+            if event_type == "customer.subscription.deleted":
+                resolved_org = organization_id or (obj.get("metadata") or {}).get("organization_id")
+                if resolved_org: send_template_email("subscription_cancelled", resolved_org)
         elif event_type.startswith("invoice."):
             self._sync_invoice(obj, event_type)
 
@@ -205,7 +234,7 @@ class BillingService:
         if event_type == "invoice.payment_failed":
             send_template_email("payment_failed", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url")})
         elif event_type == "invoice.paid":
-            send_template_email("invoice", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url")})
+            send_template_email("invoice_paid", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url")})
 
 
 def _timestamp(value: int | None) -> str | None:

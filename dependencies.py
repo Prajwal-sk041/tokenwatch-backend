@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from fastapi import Cookie, Depends, Header, HTTPException
 from datetime import datetime, timezone
-from jose import JWTError
+from jwt import InvalidTokenError
 
 from services.security import decode_access_token, hash_secret
 from services.tenant import TenantContext, require_membership
@@ -33,7 +33,7 @@ def get_principal(
         if not user_rows or not user_rows[0]["is_active"] or not session_rows or int(payload.get("ver", 0)) != int(user_rows[0]["token_version"]):
             raise ValueError("Revoked session")
         return Principal(str(payload["sub"]), str(payload["sid"]), payload.get("org"))
-    except (JWTError, KeyError, ValueError):
+    except (InvalidTokenError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid or revoked session") from None
 
 

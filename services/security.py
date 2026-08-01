@@ -3,7 +3,7 @@ import hashlib
 import secrets
 import uuid
 
-from jose import jwt
+import jwt
 
 from config import get_settings
 

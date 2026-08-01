@@ -40,7 +40,7 @@ def _page(table: str, page: int, page_size: int):
 
 @router.get("/{resource}")
 def list_resource(resource: str, page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)):
-    allowed = {"users": "users", "organizations": "organizations", "subscriptions": "subscriptions", "usage": "usage_logs", "alerts": "alert_rules", "audit": "audit_logs", "payments": "invoices"}
+    allowed = {"users": "users", "organizations": "organizations", "subscriptions": "subscriptions", "usage": "usage_logs", "alerts": "alert_rules", "audit": "audit_logs", "payments": "invoices", "plans": "plans", "feature-flags": "feature_flags", "support": "support_tickets", "email-queue": "email_deliveries", "webhooks": "billing_events"}
     if resource not in allowed:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Admin resource not found")
