@@ -2,11 +2,11 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from dependencies import Principal, get_principal, get_tenant
+from dependencies import Principal, get_principal
 from schemas.requests import MemberRoleUpdate, OrganizationCreate, OrganizationInvite
 from services.audit import record_audit
 from services.security import generate_opaque_token, hash_secret
-from services.tenant import TenantContext, require_membership
+from services.tenant import require_membership
 from services.entitlements import entitlement_service
 from utils.database import get_db
 from utils.email import send_action_email

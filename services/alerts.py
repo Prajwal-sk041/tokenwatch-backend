@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from services.alert_delivery import deliver_alert
 from utils.database import get_db
+from utils.email import retry_failed_email_deliveries
 
 
 def _period_start(period: str) -> date:
@@ -46,4 +47,5 @@ def evaluate_alerts() -> dict:
         db.table("alert_history").update(update).eq("id", history["id"]).execute()
         if status in {"sent", "stubbed"}: sent += 1
         else: failed += 1
-    return {"rules": len(rules), "processed": processed, "sent": sent, "failed": failed, "suppressed": suppressed}
+    return {"rules": len(rules), "processed": processed, "sent": sent, "failed": failed, "suppressed": suppressed,
+            "email_retries": retry_failed_email_deliveries()}

@@ -120,7 +120,7 @@ def aggregate_usage(
     for groups in dimensions.values():
         for value in groups.values(): value["cost"] = round(value["cost"], 8)
     total_cost = sum(float(x.get("calculated_cost") or 0) for x in logs)
-    days = max(1, len(daily)); elapsed = max(1, datetime.now(timezone.utc).day)
+    elapsed = max(1, datetime.now(timezone.utc).day)
     return {
         "totals": {"requests": len(logs), "tokens": sum(int(x.get("total_tokens") or 0) for x in logs), "cost": round(total_cost, 8)},
         "breakdowns": dimensions, "daily": sorted(daily.values(), key=lambda x: x["date"]),

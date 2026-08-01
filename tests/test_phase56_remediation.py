@@ -55,6 +55,22 @@ def test_production_email_preview_is_forbidden():
           "API_KEY_ENCRYPTION_KEY":"MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=","CORS_ALLOWED_ORIGINS":"https://example.com",
           "EMAIL_PREVIEW_ENABLED":"true","SENTRY_ENVIRONMENT":"production"})
 
+
+def test_rc1_email_delivery_has_encrypted_retry_and_dead_letter():
+    source = Path("utils/email.py").read_text(encoding="utf-8")
+    migration = Path("migrations/202608010008_rc1_email_delivery.sql").read_text(encoding="utf-8")
+    assert "encrypt_api_key" in source and "decrypt_api_key" in source
+    assert "retry_failed_email_deliveries" in source
+    assert '"dead_letter" if exhausted' in source
+    assert "dead_lettered_at" in migration and "email_deliveries_dead_letter_idx" in migration
+
+
+def test_rc1_billing_email_is_idempotent_per_stripe_event():
+    source = Path("services/billing.py").read_text(encoding="utf-8")
+    assert 'f"stripe:{event_id}:subscription_active"' in source
+    assert 'f"stripe:{event_id}:payment_failed"' in source
+    assert 'f"stripe:{event_id}:invoice_paid"' in source
+
 def test_alert_job_and_billing_are_server_authoritative():
     operations=Path("routers/operations.py").read_text(encoding="utf-8")
     alerts=Path("services/alerts.py").read_text(encoding="utf-8")
@@ -79,8 +95,12 @@ def test_stripe_fixture_accepts_matching_signed_event(monkeypatch):
 
 def test_resend_provider_is_used_without_exposing_recipient(monkeypatch):
     sent=[]
+    class FakeQuery:
+        def __getattr__(self, _name): return lambda *_args, **_kwargs: self
+        def execute(self): return SimpleNamespace(data=[])
     fake=SimpleNamespace(api_key=None,Emails=SimpleNamespace(send=lambda payload: sent.append(payload) or {"id":"email_1"}))
     monkeypatch.setitem(sys.modules,"resend",fake)
     monkeypatch.setattr("utils.email.get_settings",lambda:SimpleNamespace(resend_api_key="re_test",smtp_from_email="TokenWatch <test@example.com>",smtp_host="",smtp_username="",smtp_password="",smtp_port=465))
+    monkeypatch.setattr("utils.email.get_db",lambda:FakeQuery())
     assert send_alert_email("Subject","<p>Safe</p>","receiver@example.com") is True
     assert sent[0]["to"]==["receiver@example.com"]
