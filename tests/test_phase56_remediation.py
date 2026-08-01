@@ -18,6 +18,11 @@ def test_atomic_ingestion_migration_is_transactional_and_idempotent():
     assert "grant execute on function public.ingest_usage_atomic(jsonb) to service_role" in sql
     assert "reconcile_usage_counters" in sql and "p_repair boolean default false" in sql
 
+def test_onboarding_test_event_uses_atomic_ingestion():
+    source=Path("routers/onboarding.py").read_text(encoding="utf-8")
+    assert 'rpc("ingest_usage_atomic"' in source
+    assert 'table("usage_logs").insert' not in source
+
 def test_ist_midnight_uses_iana_boundary():
     selected=report_range("Asia/Kolkata","today",now=datetime(2026,8,1,12,tzinfo=timezone.utc))
     assert selected.start_utc.isoformat()=="2026-07-31T18:30:00+00:00"

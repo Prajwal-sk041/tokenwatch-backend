@@ -47,6 +47,7 @@ def test_migration_tracks_real_event_and_budget_references():
 def test_onboarding_cost_is_json_safe_and_database_clients_are_thread_scoped():
     onboarding = Path("routers/onboarding.py").read_text(encoding="utf-8")
     database = Path("utils/database.py").read_text(encoding="utf-8")
-    assert '"calculated_cost": str(calculate_cost(' in onboarding
+    assert "cost = calculate_cost(" in onboarding
+    assert '"calculated_cost": str(cost)' in onboarding
     assert "threading.local()" in database
     assert "@lru_cache" not in database
