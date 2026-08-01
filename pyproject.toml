@@ -11,6 +11,9 @@ dependencies = [
     "pydantic==2.13.4",
     "python-jose==3.5.0",
     "requests==2.33.1",
+    "resend==2.19.0",
+    "sentry-sdk[fastapi]==2.35.0",
+    "stripe==12.5.1",
     "supabase==2.30.0",
 ]
 

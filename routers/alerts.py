@@ -6,6 +6,7 @@ from dependencies import get_tenant
 from schemas.requests import AlertCreate, AlertUpdate
 from services.audit import record_audit
 from services.tenant import TenantContext
+from services.entitlements import entitlement_service
 from utils.database import get_db
 
 
@@ -20,6 +21,7 @@ def list_alerts(tenant: TenantContext = Depends(get_tenant)):
 @router.post("/create", status_code=201)
 def create_alert(payload: AlertCreate, tenant: TenantContext = Depends(get_tenant)):
     if tenant.role == "viewer": raise HTTPException(status_code=403, detail="Viewer cannot create alerts")
+    entitlement_service.enforce_count(tenant.organization_id, "alerts", "alert_rules", is_active=True)
     destination = payload.destination or (str(payload.notify_email) if payload.notify_email else None)
     if payload.channel == "email" and not destination:
         users = get_db().table("users").select("email").eq("id", tenant.user_id).limit(1).execute().data or []

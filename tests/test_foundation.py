@@ -62,6 +62,7 @@ def test_key_create_encrypts_storage_and_returns_only_mask(monkeypatch):
     db = FakeQuery()
     monkeypatch.setattr(keys, "get_db", lambda: db)
     monkeypatch.setattr(keys, "record_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(keys.entitlement_service, "enforce_count", lambda *args, **kwargs: None)
     response = keys.add_key(
         keys.AddKeyRequest(name="Primary", provider="openai", key_value="sk-example-secret-123456"),
         TenantContext("org-1", "user-1", "owner"),

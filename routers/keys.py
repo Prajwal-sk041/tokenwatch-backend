@@ -7,6 +7,7 @@ from dependencies import Principal, get_principal, get_tenant
 from schemas.requests import AddKeyRequest
 from services.audit import record_audit
 from services.tenant import TenantContext
+from services.entitlements import entitlement_service
 from utils.database import get_db
 from utils.encryption import decrypt_api_key, encrypt_api_key, mask_api_key
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 def add_key(data: AddKeyRequest, tenant: TenantContext = Depends(get_tenant)):
     if tenant.role not in {"owner", "admin", "member"}:
         raise HTTPException(status_code=403, detail="Insufficient organization role")
+    entitlement_service.enforce_count(tenant.organization_id, "provider_keys", "api_keys", key_type="provider", is_active=True)
     row = get_db().table("api_keys").insert({
         "organization_id": tenant.organization_id, "created_by": tenant.user_id, "key_type": "provider",
         "name": data.name, "provider": data.provider.value, "encrypted_key": encrypt_api_key(data.key_value),

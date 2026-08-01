@@ -168,6 +168,15 @@ class SubscriptionChange(StrictModel):
     plan_code: str = Field(min_length=1, max_length=50, pattern=r"^[a-z0-9_-]+$")
 
 
+class CheckoutCreate(StrictModel):
+    plan_code: str = Field(pattern=r"^(starter|pro|team)$")
+    billing_interval: str = Field(default="month", pattern=r"^(month|year)$")
+
+
+class PortalCreate(StrictModel):
+    return_path: str = Field(default="/dashboard/billing", pattern=r"^/[A-Za-z0-9/_-]*$")
+
+
 class OnboardingUpdate(StrictModel):
     current_step: int = Field(ge=1, le=11)
     completed_steps: list[int] = Field(default_factory=list, max_length=11)
