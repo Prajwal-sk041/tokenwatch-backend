@@ -1,10 +1,8 @@
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from dependencies import Principal, get_principal
 from schemas.requests import SubscriptionChange
-from services.audit import record_audit
 from services.tenant import require_membership
 from utils.database import get_db
 

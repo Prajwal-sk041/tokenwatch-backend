@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from dependencies import Principal, get_principal, get_tenant
+from dependencies import get_tenant
 from schemas.requests import AddKeyRequest
 from services.audit import record_audit
 from services.tenant import TenantContext

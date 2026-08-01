@@ -167,7 +167,7 @@ class BillingService:
             if event_type not in self.handled_events:
                 status = "ignored"
             else:
-                self._dispatch(event_type, obj, organization_id)
+                self._dispatch(event_type, obj, organization_id, event_id)
                 status = "processed"
             get_db().table("billing_events").update({"status": status, "processed_at": datetime.now(timezone.utc).isoformat()}).eq("provider_event_id", event_id).eq("provider", "stripe").execute()
             return status
@@ -176,24 +176,24 @@ class BillingService:
             get_db().table("billing_events").update({"status": "failed", "error_message": str(exc)[:1000]}).eq("provider_event_id", event_id).eq("provider", "stripe").execute()
             raise
 
-    def _dispatch(self, event_type: str, obj: dict[str, Any], organization_id: str | None) -> None:
+    def _dispatch(self, event_type: str, obj: dict[str, Any], organization_id: str | None, event_id: str) -> None:
         if event_type == "checkout.session.completed":
             if not organization_id:
                 raise ValueError("Checkout is missing organization metadata")
             return
         if event_type == "customer.subscription.trial_will_end":
-            self._sync_subscription(obj, organization_id)
+            self._sync_subscription(obj, organization_id, event_id)
             resolved_org = organization_id or (obj.get("metadata") or {}).get("organization_id")
-            if resolved_org: send_template_email("trial_ending", resolved_org)
+            if resolved_org: send_template_email("trial_ending", resolved_org, context={"idempotency_key": f"stripe:{event_id}:trial_ending"})
         elif event_type.startswith("customer.subscription."):
-            self._sync_subscription(obj, organization_id)
+            self._sync_subscription(obj, organization_id, event_id)
             if event_type == "customer.subscription.deleted":
                 resolved_org = organization_id or (obj.get("metadata") or {}).get("organization_id")
-                if resolved_org: send_template_email("subscription_cancelled", resolved_org)
+                if resolved_org: send_template_email("subscription_cancelled", resolved_org, context={"idempotency_key": f"stripe:{event_id}:subscription_cancelled"})
         elif event_type.startswith("invoice."):
-            self._sync_invoice(obj, event_type)
+            self._sync_invoice(obj, event_type, event_id)
 
-    def _sync_subscription(self, obj: dict[str, Any], organization_id: str | None) -> None:
+    def _sync_subscription(self, obj: dict[str, Any], organization_id: str | None, event_id: str) -> None:
         metadata = obj.get("metadata") or {}
         organization_id = organization_id or metadata.get("organization_id")
         if not organization_id:
@@ -214,9 +214,9 @@ class BillingService:
             get_db().table("subscriptions").insert(values).execute()
         record_audit("subscription.synced", organization_id=organization_id, target_type="subscription", metadata={"status": values["status"], "plan": plan["code"]})
         if values["status"] == "active":
-            send_template_email("subscription_active", organization_id)
+            send_template_email("subscription_active", organization_id, context={"idempotency_key": f"stripe:{event_id}:subscription_active"})
 
-    def _sync_invoice(self, obj: dict[str, Any], event_type: str) -> None:
+    def _sync_invoice(self, obj: dict[str, Any], event_type: str, event_id: str) -> None:
         subscription_id = obj.get("subscription")
         subs = get_db().table("subscriptions").select("id,organization_id").eq("provider_subscription_id", subscription_id).limit(1).execute().data or []
         if not subs:
@@ -232,9 +232,9 @@ class BillingService:
         else: get_db().table("invoices").insert(values).execute()
         get_db().table("subscriptions").update({"latest_invoice_id": obj["id"], "payment_failure_at": datetime.now(timezone.utc).isoformat() if event_type == "invoice.payment_failed" else None}).eq("id", sub["id"]).execute()
         if event_type == "invoice.payment_failed":
-            send_template_email("payment_failed", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url")})
+            send_template_email("payment_failed", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url"), "idempotency_key": f"stripe:{event_id}:payment_failed"})
         elif event_type == "invoice.paid":
-            send_template_email("invoice_paid", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url")})
+            send_template_email("invoice_paid", sub["organization_id"], context={"invoice_url": obj.get("hosted_invoice_url"), "idempotency_key": f"stripe:{event_id}:invoice_paid"})
 
 
 def _timestamp(value: int | None) -> str | None:

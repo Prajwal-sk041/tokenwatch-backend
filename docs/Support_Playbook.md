@@ -1,0 +1,3 @@
+# Support Playbook
+
+Authenticate the requester and organization before discussing account data. Ask for request IDs, timestamps and non-secret SDK key prefixes—not passwords, tokens, full keys or provider credentials. Classify security/payment/data-loss reports as urgent. For ingestion, trace SDK → API status → idempotency → usage row → counter → dashboard. For billing, use Stripe event/invoice IDs and `billing_events`; never handle card data. For email, use recipient hashes/provider IDs and retry/dead-letter status. Record actions in audit/support systems and provide status updates without exposing internal stack traces.
