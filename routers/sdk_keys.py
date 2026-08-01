@@ -7,6 +7,7 @@ from schemas.requests import IngestionKeyCreate
 from services.audit import record_audit
 from services.security import generate_opaque_token, hash_secret
 from services.tenant import require_membership
+from services.entitlements import entitlement_service
 from utils.database import get_db
 
 
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/sdk-keys", tags=["TokenWatch SDK Keys"])
 @router.post("/{organization_id}", status_code=201)
 def create_sdk_key(organization_id: str, payload: IngestionKeyCreate, principal: Principal = Depends(get_principal)):
     require_membership(principal.user_id, organization_id, "admin")
+    entitlement_service.enforce_count(organization_id, "sdk_keys", "api_keys", key_type="ingestion", is_active=True)
     raw = generate_opaque_token("tw_live_")
     key = get_db().table("api_keys").insert({
         "organization_id": organization_id, "created_by": principal.user_id, "key_type": "ingestion",

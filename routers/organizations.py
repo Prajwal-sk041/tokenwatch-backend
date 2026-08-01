@@ -7,6 +7,7 @@ from schemas.requests import MemberRoleUpdate, OrganizationCreate, OrganizationI
 from services.audit import record_audit
 from services.security import generate_opaque_token, hash_secret
 from services.tenant import TenantContext, require_membership
+from services.entitlements import entitlement_service
 from utils.database import get_db
 from utils.email import send_action_email
 from config import get_settings
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/organizations", tags=["Organizations"])
 
 @router.post("", status_code=201)
 def create_organization(payload: OrganizationCreate, principal: Principal = Depends(get_principal)):
+    entitlement_service.enforce_organization_creation(principal.user_id)
     if get_db().table("organizations").select("id").eq("slug", payload.slug).is_("deleted_at", "null").execute().data:
         raise HTTPException(status_code=409, detail="Organization slug already exists")
     org = get_db().table("organizations").insert({"name": payload.name, "slug": payload.slug, "owner_user_id": principal.user_id}).execute().data[0]
@@ -40,6 +42,7 @@ def list_organizations(principal: Principal = Depends(get_principal)):
 @router.post("/{organization_id}/invites", status_code=201)
 def invite_member(organization_id: str, payload: OrganizationInvite, principal: Principal = Depends(get_principal)):
     require_membership(principal.user_id, organization_id, "admin")
+    entitlement_service.enforce_count(organization_id, "members", "organization_members")
     token = generate_opaque_token("twi_")
     invite = get_db().table("organization_members").insert({
         "organization_id": organization_id, "invited_email": str(payload.email).lower(), "role": payload.role,

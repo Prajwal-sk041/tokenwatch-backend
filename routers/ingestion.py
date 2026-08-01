@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from dependencies import SdkPrincipal, get_sdk_principal, require_sdk_permission
 from schemas.requests import UsageLog
 from services.pricing import calculate_cost
+from services.entitlements import entitlement_service
 from utils.database import get_db
 
 
@@ -21,6 +22,17 @@ def ingest_usage(payload: UsageLog, sdk: SdkPrincipal = Depends(get_sdk_principa
         cost = calculate_cost(payload.provider.value, payload.model, payload.prompt_tokens, payload.completion_tokens)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    snapshot = entitlement_service.usage_snapshot(sdk.organization_id)
+    limits, usage = snapshot["limits"], snapshot["usage"]
+    requested_tokens = payload.prompt_tokens + payload.completion_tokens
+    for feature, current, added in (
+        ("monthly_requests", int(usage.get("request_count") or 0), 1),
+        ("monthly_tokens", int(usage.get("token_count") or 0), requested_tokens),
+        ("monthly_spend", float(usage.get("cost") or 0), float(cost)),
+    ):
+        limit = limits.get(feature, 0)
+        if limit != -1 and current + added > limit:
+            raise HTTPException(status_code=402, detail={"code": "usage_limit_reached", "feature": feature, "limit": limit})
     timestamp = payload.timestamp or datetime.now(timezone.utc)
     if payload.attributed_user_id:
         member = get_db().table("organization_members").select("id").eq("organization_id", sdk.organization_id).eq("user_id", payload.attributed_user_id).eq("status", "active").limit(1).execute().data or []

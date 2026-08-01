@@ -24,6 +24,13 @@ class Settings(BaseModel):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
+    resend_api_key: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_tax_enabled: bool = False
+    sentry_dsn: str = ""
+    sentry_environment: str = "production"
+    admin_emails: tuple[str, ...] = ()
     email_preview_enabled: bool = False
     alert_scheduler_enabled: bool = False
     api_key_encryption_key: str
@@ -75,6 +82,13 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         smtp_username=env.get("SMTP_USERNAME", ""),
         smtp_password=env.get("SMTP_PASSWORD", ""),
         smtp_from_email=env.get("SMTP_FROM_EMAIL", ""),
+        resend_api_key=env.get("RESEND_API_KEY", ""),
+        stripe_secret_key=env.get("STRIPE_SECRET_KEY", ""),
+        stripe_webhook_secret=env.get("STRIPE_WEBHOOK_SECRET", ""),
+        stripe_tax_enabled=env.get("STRIPE_TAX_ENABLED", "false").lower() in {"1", "true", "yes", "on"},
+        sentry_dsn=env.get("SENTRY_DSN", ""),
+        sentry_environment=env.get("SENTRY_ENVIRONMENT", "production"),
+        admin_emails=tuple(x.strip().lower() for x in env.get("ADMIN_EMAILS", "").split(",") if x.strip()),
         email_preview_enabled=env.get("EMAIL_PREVIEW_ENABLED", "false").lower() in {"1", "true", "yes", "on"},
         alert_scheduler_enabled=env.get("ALERT_SCHEDULER_ENABLED", "false").lower()
         in {"1", "true", "yes", "on"},

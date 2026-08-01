@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
 from logging_config import configure_logging, csrf_origin_middleware, request_id_middleware
-from routers import alerts, audit, auth, budgets, ingestion, keys, onboarding, organizations, policy, sdk_keys, subscriptions, usage
+from routers import admin, alerts, audit, auth, billing, budgets, ingestion, keys, onboarding, organizations, policy, sdk_keys, subscriptions, usage
 from utils.database import check_database_connection
+import sentry_sdk
 
 
 configure_logging()
@@ -30,6 +31,8 @@ async def lifespan(app: FastAPI):
 
 
 settings = get_settings()
+if settings.sentry_dsn:
+    sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.sentry_environment, traces_sample_rate=0.1, send_default_pii=False)
 app = FastAPI(
     title="TokenWatch API",
     description="API token usage monitor",
@@ -59,6 +62,8 @@ app.include_router(policy.router)
 app.include_router(budgets.router)
 app.include_router(audit.router)
 app.include_router(subscriptions.router)
+app.include_router(billing.router)
+app.include_router(admin.router)
 
 
 @app.get("/")

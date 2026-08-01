@@ -7,6 +7,7 @@ from jose import JWTError
 from services.security import decode_access_token, hash_secret
 from services.tenant import TenantContext, require_membership
 from utils.database import get_db
+from config import get_settings
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,13 @@ def get_tenant(principal: Principal = Depends(get_principal)) -> TenantContext:
     if not principal.organization_id:
         raise HTTPException(status_code=400, detail="No active organization")
     return require_membership(principal.user_id, principal.organization_id)
+
+
+def require_platform_admin(principal: Principal = Depends(get_principal)) -> Principal:
+    rows = get_db().table("users").select("email,is_platform_admin").eq("id", principal.user_id).limit(1).execute().data or []
+    if not rows or not (rows[0].get("is_platform_admin") or rows[0].get("email", "").lower() in get_settings().admin_emails):
+        raise HTTPException(status_code=403, detail="Platform administrator access required")
+    return principal
 
 
 @dataclass(frozen=True)

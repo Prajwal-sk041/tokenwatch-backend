@@ -65,3 +65,6 @@ websockets==15.0.1
 yarl==1.23.0
 zstandard==0.25.0
 pytest==9.0.2
+stripe==12.5.1
+resend==2.19.0
+sentry-sdk[fastapi]==2.35.0
