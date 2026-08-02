@@ -66,8 +66,10 @@ def register(data: RegisterRequest, request: Request):
     token = generate_opaque_token("twv_")
     db.table("auth_action_tokens").insert({"user_id": user["id"], "token_hash": hash_secret(token), "purpose": "verify_email", "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()}).execute()
     record_audit("account.registered", organization_id=str(org["id"]), actor_user_id=str(user["id"]), target_type="user", target_id=str(user["id"]))
-    send_action_email("Verify your TokenWatch email", f"{str(get_settings().app_base_url).rstrip('/')}/verify-email?token={token}", email)
-    return {"message": "Registration successful. Verify your email before signing in.", "user_id": user["id"]}
+    email_sent = send_action_email("Verify your TokenWatch email", f"{str(get_settings().app_base_url).rstrip('/')}/verify-email?token={token}", email)
+    message = ("Registration successful. Verify your email before signing in." if email_sent else
+               "Registration successful, but the verification email could not be sent right now. Use \"Resend verification\" in a few minutes, or contact support if this continues.")
+    return {"message": message, "user_id": user["id"], "email_delivery": email_sent}
 
 
 @router.post("/verify-email")
