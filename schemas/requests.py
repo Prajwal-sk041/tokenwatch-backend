@@ -42,7 +42,7 @@ class StrictModel(BaseModel):
 
 class RegisterRequest(StrictModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
     full_name: str = Field(default="", max_length=100)
 
 
@@ -57,7 +57,7 @@ class PasswordResetRequest(StrictModel):
 
 class PasswordResetConfirm(StrictModel):
     token: str = Field(min_length=32, max_length=512)
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
 
 
 class TokenActionRequest(StrictModel):
