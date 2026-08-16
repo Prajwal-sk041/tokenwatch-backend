@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from main import app
-from schemas.requests import AlertCreate, BudgetPolicyCreate, OnboardingUpdate
+from schemas.requests import AlertCreate, BudgetPolicyCreate, OnboardingUpdate, PasswordChangeRequest, PasswordResetConfirm, RegisterRequest
 
 
 def test_phase3_routes_are_discoverable():
@@ -51,3 +51,21 @@ def test_onboarding_cost_is_json_safe_and_database_clients_are_thread_scoped():
     assert '"calculated_cost": str(cost)' in onboarding
     assert "threading.local()" in database
     assert "@lru_cache" not in database
+
+
+@pytest.mark.parametrize("password", ["Ab1!x", "Longer9$password"])
+def test_password_policy_accepts_requested_shape(password):
+    assert RegisterRequest(email="user@example.com", password=password).password == password
+    assert PasswordResetConfirm(token="x" * 32, new_password=password).new_password == password
+    assert PasswordChangeRequest(current_password="old", new_password=password).new_password == password
+
+
+@pytest.mark.parametrize("password", ["A1!", "abc1!", "Abcd!", "Abcd1"])
+def test_password_policy_rejects_missing_requirement(password):
+    with pytest.raises(ValidationError):
+        RegisterRequest(email="user@example.com", password=password)
+
+
+def test_account_management_routes_are_discoverable():
+    paths = {route.path for route in app.routes}
+    assert {"/auth/me", "/auth/change-password"} <= paths

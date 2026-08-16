@@ -18,7 +18,7 @@ def evaluate_budget(current: Decimal, estimated: Decimal, amount: Decimal | None
     projected = current + estimated
     hard_limit = amount * hard_stop_percent / Decimal(100)
     warning_limit = amount * warning_percent / Decimal(100)
-    remaining = max(Decimal(0), amount - current)
+    remaining = amount - current
     if projected >= hard_limit and action == "block":
         return BudgetDecision(False, True, "block", "Hard budget threshold reached", remaining, current)
     if projected >= warning_limit:

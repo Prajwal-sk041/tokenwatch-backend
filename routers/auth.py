@@ -6,7 +6,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 
 from config import get_settings
 from dependencies import Principal, get_principal
-from schemas.requests import LoginRequest, PasswordResetConfirm, PasswordResetRequest, RegisterRequest, TokenActionRequest
+from schemas.requests import LoginRequest, PasswordChangeRequest, PasswordResetConfirm, PasswordResetRequest, ProfileUpdateRequest, RegisterRequest, TokenActionRequest
 from services.audit import record_audit
 from services.security import create_access_token, generate_opaque_token, hash_secret
 from services.rate_limit import consume
@@ -93,8 +93,10 @@ def resend_verification(data: PasswordResetRequest, request: Request):
     if rows and not rows[0].get("email_verified_at"):
         token = generate_opaque_token("twv_")
         get_db().table("auth_action_tokens").insert({"user_id": rows[0]["id"], "token_hash": hash_secret(token), "purpose": "verify_email", "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()}).execute()
-        send_action_email("Verify your TokenWatch email", f"{str(get_settings().app_base_url).rstrip('/')}/verify-email?token={token}", rows[0]["email"])
-    return {"message": "If verification is pending, a new message was requested"}
+        delivered = send_action_email("Verify your TokenWatch email", f"{str(get_settings().app_base_url).rstrip('/')}/verify-email?token={token}", rows[0]["email"])
+        if not delivered:
+            logger.warning("verification resend could not be delivered", extra={"user_id": str(rows[0]["id"])})
+    return {"message": "If verification is pending, delivery was requested. Check spam and contact support if no message arrives."}
 
 
 @router.post("/login")
@@ -179,6 +181,27 @@ def confirm_password_reset(data: PasswordResetConfirm):
     get_db().table("auth_action_tokens").update({"consumed_at": now}).eq("id", rows[0]["id"]).execute()
     record_audit("account.password_reset", actor_user_id=user_id, target_type="user", target_id=user_id)
     return {"message": "Password reset; all sessions revoked"}
+
+
+@router.patch("/me")
+def update_me(data: ProfileUpdateRequest, principal: Principal = Depends(get_principal)):
+    rows = get_db().table("users").update({"full_name": data.full_name}).eq("id", principal.user_id).execute().data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="User not found")
+    record_audit("account.profile_updated", actor_user_id=principal.user_id, organization_id=principal.organization_id)
+    return {"id": rows[0]["id"], "email": rows[0]["email"], "full_name": rows[0].get("full_name", "")}
+
+
+@router.post("/change-password", status_code=204)
+def change_password(data: PasswordChangeRequest, response: Response, principal: Principal = Depends(get_principal)):
+    rows = get_db().table("users").select("hashed_password,token_version").eq("id", principal.user_id).limit(1).execute().data or []
+    if not rows or not verify_password(data.current_password, rows[0]["hashed_password"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().table("users").update({"hashed_password": hash_password(data.new_password), "token_version": int(rows[0]["token_version"]) + 1}).eq("id", principal.user_id).execute()
+    get_db().table("auth_sessions").update({"revoked_at": now}).eq("user_id", principal.user_id).is_("revoked_at", "null").execute()
+    record_audit("account.password_changed", actor_user_id=principal.user_id, organization_id=principal.organization_id)
+    _clear_session_cookies(response)
 
 
 @router.post("/disable", status_code=204)

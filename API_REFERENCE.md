@@ -11,6 +11,10 @@ All JSON request models reject unknown fields. Browser routes use HttpOnly sessi
 - `POST /auth/logout` — revoke the current session.
 - `POST /auth/password-reset/request` — issue reset instructions without account enumeration.
 - `POST /auth/password-reset/confirm` — update password and revoke all sessions.
+- `PATCH /auth/me` — update the authenticated user's full name.
+- `POST /auth/change-password` — verify the current password, update it, revoke all sessions, and clear cookies.
+
+Passwords must contain at least 5 characters, one uppercase letter, one number, and one special character. The same rule applies to registration, reset, and change-password requests.
 - `POST /auth/disable` — disable the account and revoke sessions.
 - `GET /auth/me` — current identity and organization.
 
