@@ -40,10 +40,24 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+def validate_password_policy(value: str) -> str:
+    if len(value) < 5:
+        raise ValueError("password must contain at least 5 characters")
+    if not any(character.isupper() for character in value):
+        raise ValueError("password must contain at least one uppercase letter")
+    if not any(character.isdigit() for character in value):
+        raise ValueError("password must contain at least one number")
+    if not any(not character.isalnum() for character in value):
+        raise ValueError("password must contain at least one special character")
+    return value
+
+
 class RegisterRequest(StrictModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=5, max_length=128)
     full_name: str = Field(default="", max_length=100)
+
+    _validate_password = field_validator("password")(validate_password_policy)
 
 
 class LoginRequest(StrictModel):
@@ -57,7 +71,20 @@ class PasswordResetRequest(StrictModel):
 
 class PasswordResetConfirm(StrictModel):
     token: str = Field(min_length=32, max_length=512)
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=5, max_length=128)
+
+    _validate_password = field_validator("new_password")(validate_password_policy)
+
+
+class PasswordChangeRequest(StrictModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=5, max_length=128)
+
+    _validate_password = field_validator("new_password")(validate_password_policy)
+
+
+class ProfileUpdateRequest(StrictModel):
+    full_name: str = Field(min_length=1, max_length=100)
 
 
 class TokenActionRequest(StrictModel):

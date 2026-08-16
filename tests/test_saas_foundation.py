@@ -44,6 +44,8 @@ def test_budget_engine_allows_warns_and_blocks():
     assert evaluate_budget(Decimal("79"), Decimal("2"), Decimal("100")).action == "warn"
     decision = evaluate_budget(Decimal("99"), Decimal("2"), Decimal("100"))
     assert decision.blocked and not decision.allowed
+    overspent = evaluate_budget(Decimal("125"), Decimal("0"), Decimal("100"))
+    assert overspent.remaining_budget == Decimal("-25")
 
 
 def test_sdk_authentication_hash_is_deterministic_and_permission_scoped():

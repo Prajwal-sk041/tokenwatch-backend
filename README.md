@@ -24,3 +24,9 @@ Health probes are `GET /health/live` and `GET /health/ready`. The readiness prob
 The in-process alert scheduler is disabled by default. Production should invoke alert processing from one dedicated worker or scheduled job, not every web process.
 
 Provider API keys are encrypted with Fernet before Supabase storage. API responses expose only metadata and a masked display value. Rotating `API_KEY_ENCRYPTION_KEY` requires a planned ciphertext migration.
+
+## Account security
+
+Registration, password reset, and authenticated password changes share one policy: at least 5 characters, including at least one uppercase letter, one number, and one special character. Changing or resetting a password revokes existing sessions.
+
+Email verification is mandatory. Production must configure either `RESEND_API_KEY` plus a verified `SMTP_FROM_EMAIL` domain, or all SMTP settings. When delivery is unavailable, registration succeeds in a pending-verification state and reports that delivery could not be confirmed; it never pretends an email was sent.
