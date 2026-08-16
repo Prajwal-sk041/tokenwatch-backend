@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "APScheduler==3.11.2",
     "bcrypt==5.0.0",
-    "cryptography==48.0.1",
+    "cryptography==50.0.0",
     "email-validator==2.3.0",
     "fastapi==0.136.1",
     "pydantic==2.13.4",
