@@ -83,3 +83,20 @@ def verify_test_event(organization_id: str, principal: Principal = Depends(get_p
         return {"received": False}
     rows = get_db().table("usage_logs").select("id,provider,model,created_at").eq("id", event_id).eq("organization_id", organization_id).limit(1).execute().data or []
     return {"received": bool(rows), "event": rows[0] if rows else None}
+
+
+@router.get("/{organization_id}/diagnostics")
+def integration_diagnostics(organization_id: str, principal: Principal = Depends(get_principal)):
+    require_membership(principal.user_id, organization_id)
+    db = get_db()
+    keys = db.table("api_keys").select("id,name,last_used_at").eq("organization_id", organization_id).eq("key_type", "ingestion").eq("is_active", True).is_("revoked_at", "null").execute().data or []
+    events = db.table("usage_logs").select("id,provider,model,request_timestamp").eq("organization_id", organization_id).is_("deleted_at", "null").order("request_timestamp", desc=True).limit(1).execute().data or []
+    budgets = db.table("budget_policies").select("id").eq("organization_id", organization_id).eq("is_active", True).is_("deleted_at", "null").limit(1).execute().data or []
+    alerts = db.table("alert_rules").select("id").eq("organization_id", organization_id).eq("is_active", True).is_("deleted_at", "null").limit(1).execute().data or []
+    checks = [
+        {"code": "sdk_key", "label": "Active SDK key", "complete": bool(keys), "action": "/dashboard/sdk-keys"},
+        {"code": "usage", "label": "Usage event received", "complete": bool(events), "action": "/onboarding"},
+        {"code": "budget", "label": "Budget policy active", "complete": bool(budgets), "action": "/dashboard/budgets"},
+        {"code": "alert", "label": "Alert rule active", "complete": bool(alerts), "action": "/dashboard/alerts"},
+    ]
+    return {"ready": all(check["complete"] for check in checks), "checks": checks, "last_event": events[0] if events else None, "active_sdk_keys": len(keys)}

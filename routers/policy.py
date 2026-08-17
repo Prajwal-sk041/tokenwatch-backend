@@ -3,14 +3,20 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from dependencies import SdkPrincipal, get_sdk_principal, require_sdk_permission
+from dependencies import SdkPrincipal, get_sdk_principal, require_sdk_permission, get_tenant
 from services.budget import BudgetDecision, evaluate_budget
 from services.pricing import calculate_cost
 from services.audit import record_audit
 from utils.database import get_db
+from services.tenant import TenantContext
 
 
 router = APIRouter(prefix="/policy", tags=["Policy Engine"])
+
+
+@router.get("/history")
+def policy_history(limit: int = Query(default=50, ge=1, le=100), tenant: TenantContext = Depends(get_tenant)):
+    return get_db().table("policy_decisions").select("id,provider,model,decision,reason,estimated_cost,remaining_budget,created_at").eq("organization_id", tenant.organization_id).order("created_at", desc=True).limit(limit).execute().data or []
 
 
 @router.get("/check")
@@ -40,6 +46,7 @@ def check_policy(
         current = sum(Decimal(str(row["cost"])) for row in (query.execute().data or []))
         decisions.append(evaluate_budget(current, estimated, Decimal(str(policy["amount"])), Decimal(str(policy["warning_threshold_percent"])), Decimal(str(policy["hard_stop_threshold_percent"])), policy["action"]))
     decision = next((item for item in decisions if item.blocked), next((item for item in decisions if item.action == "warn"), BudgetDecision(True, False, "allow", "No blocking policy", None, Decimal(0))))
+    get_db().table("policy_decisions").insert({"organization_id": sdk.organization_id, "ingestion_key_id": sdk.key_id, "provider": provider, "model": model, "decision": "block" if decision.blocked else decision.action, "reason": decision.reason, "estimated_cost": str(estimated), "remaining_budget": str(decision.remaining_budget) if decision.remaining_budget is not None else None}).execute()
     if decision.blocked:
         record_audit(
             "policy.request_blocked",

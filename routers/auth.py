@@ -229,5 +229,22 @@ def get_me(principal: Principal = Depends(get_principal)):
     return {**rows[0], "organization_id": principal.organization_id}
 
 
+@router.get("/export")
+def export_account(principal: Principal = Depends(get_principal)):
+    """Portable JSON export without secrets, hashes, or provider credentials."""
+    db = get_db()
+    user = db.table("users").select("id,email,full_name,email_verified_at,is_active,created_at,last_login_at").eq("id", principal.user_id).limit(1).execute().data or []
+    memberships = db.table("organization_members").select("organization_id,role,status,joined_at").eq("user_id", principal.user_id).is_("deleted_at", "null").execute().data or []
+    organization_ids = [str(row["organization_id"]) for row in memberships]
+    organizations, budgets, alerts, usage = [], [], [], []
+    for organization_id in organization_ids:
+        organizations.extend(db.table("organizations").select("id,name,slug,created_at").eq("id", organization_id).execute().data or [])
+        budgets.extend(db.table("budget_policies").select("scope_type,scope_value,period_type,amount,warning_threshold_percent,hard_stop_threshold_percent,action,is_active,created_at").eq("organization_id", organization_id).is_("deleted_at", "null").execute().data or [])
+        alerts.extend(db.table("alert_rules").select("name,metric,threshold,provider,period,channel,is_active,created_at").eq("organization_id", organization_id).is_("deleted_at", "null").execute().data or [])
+        usage.extend(db.table("usage_logs").select("provider,model,prompt_tokens,completion_tokens,total_tokens,calculated_cost,project,agent,environment,request_timestamp").eq("organization_id", organization_id).is_("deleted_at", "null").order("request_timestamp", desc=True).limit(10000).execute().data or [])
+    record_audit("account.data_exported", actor_user_id=principal.user_id, organization_id=principal.organization_id)
+    return {"exported_at": datetime.now(timezone.utc).isoformat(), "user": user[0] if user else None, "memberships": memberships, "organizations": organizations, "budgets": budgets, "alerts": alerts, "usage": usage, "usage_limit_notice": "The newest 10,000 usage events per organization are included."}
+
+
 def get_current_user(principal: Principal = Depends(get_principal)) -> str:
     return principal.user_id
