@@ -111,8 +111,15 @@ def login(data: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=403, detail="Account is disabled")
     if not user.get("email_verified_at"):
         raise HTTPException(status_code=403, detail="Email verification required")
+    # A personal account represents one human, not a shared team credential.
+    # A successful sign-in replaces older device sessions immediately; paid
+    # collaboration is provided through separately auditable member seats.
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().table("auth_sessions").update({"revoked_at": now}).eq(
+        "user_id", user["id"]
+    ).is_("revoked_at", "null").execute()
     tokens = _issue_session(user, request, response)
-    get_db().table("users").update({"last_login_at": datetime.now(timezone.utc).isoformat()}).eq("id", user["id"]).execute()
+    get_db().table("users").update({"last_login_at": now}).eq("id", user["id"]).execute()
     record_audit("auth.login", actor_user_id=str(user["id"]), organization_id=_default_organization(str(user["id"])))
     return {**tokens, "user_id": user["id"], "email": user["email"], "full_name": user.get("full_name", "")}
 

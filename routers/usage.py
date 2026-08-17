@@ -7,6 +7,8 @@ from dependencies import get_tenant
 from services.tenant import TenantContext
 from schemas.requests import ReconciliationRequest
 from services.reporting import local_day, report_range, timezone_or_422
+from services.insights import build_cost_insights
+from services.entitlements import entitlement_service
 from utils.database import get_db
 
 
@@ -120,10 +122,46 @@ def aggregate_usage(
     for groups in dimensions.values():
         for value in groups.values(): value["cost"] = round(value["cost"], 8)
     total_cost = sum(float(x.get("calculated_cost") or 0) for x in logs)
-    elapsed = max(1, datetime.now(timezone.utc).day)
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_cost = sum(
+        float(x.get("calculated_cost") or 0)
+        for x in logs
+        if datetime.fromisoformat(str(x["request_timestamp"]).replace("Z", "+00:00")) >= month_start
+    )
+    elapsed = max(1, now.day)
     return {
         "totals": {"requests": len(logs), "tokens": sum(int(x.get("total_tokens") or 0) for x in logs), "cost": round(total_cost, 8)},
         "breakdowns": dimensions, "daily": sorted(daily.values(), key=lambda x: x["date"]),
-        "current_month_projection": round(total_cost / elapsed * 30, 8), "timezone": timezone_name,
+        "current_month_projection": round(month_cost / elapsed * 30, 8), "timezone": timezone_name,
         "range": {"preset": preset, "start_utc": selected.start_utc.isoformat(), "end_utc_exclusive": selected.end_utc.isoformat()},
     }
+
+
+@router.get("/insights")
+def get_insights(tenant: TenantContext = Depends(get_tenant)):
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    logs = _all_filtered_logs(tenant, start=month_start, columns="provider,model,total_tokens,calculated_cost,request_timestamp")
+    policy_events = get_db().table("audit_logs").select("metadata,created_at").eq(
+        "organization_id", tenant.organization_id
+    ).eq("action", "policy.request_blocked").gte("created_at", month_start.isoformat()).execute().data or []
+    result = build_cost_insights(logs, policy_events, now=now)
+    forecast_enabled = entitlement_service.limit(tenant.organization_id, "spend_forecast") is True
+    ledger_enabled = entitlement_service.limit(tenant.organization_id, "savings_ledger") is True
+    optimization_enabled = entitlement_service.limit(tenant.organization_id, "optimization_recommendations") is True
+    if not forecast_enabled:
+        result["month"]["projected_cost"] = None
+        result["risk"] = {**result["risk"], "level": "normal", "anomaly_ratio": None}
+    if not ledger_enabled:
+        result["value"]["blocked_requests"] = 0
+        result["value"]["estimated_spend_prevented"] = 0
+    if not optimization_enabled:
+        result["value"]["estimated_optimization_opportunity"] = 0
+        result["recommendations"] = []
+    result["features"] = {
+        "spend_forecast": forecast_enabled,
+        "savings_ledger": ledger_enabled,
+        "optimization_recommendations": optimization_enabled,
+    }
+    return result

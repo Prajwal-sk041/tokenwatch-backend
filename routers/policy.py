@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from dependencies import SdkPrincipal, get_sdk_principal, require_sdk_permission
 from services.budget import BudgetDecision, evaluate_budget
 from services.pricing import calculate_cost
+from services.audit import record_audit
 from utils.database import get_db
 
 
@@ -39,4 +40,17 @@ def check_policy(
         current = sum(Decimal(str(row["cost"])) for row in (query.execute().data or []))
         decisions.append(evaluate_budget(current, estimated, Decimal(str(policy["amount"])), Decimal(str(policy["warning_threshold_percent"])), Decimal(str(policy["hard_stop_threshold_percent"])), policy["action"]))
     decision = next((item for item in decisions if item.blocked), next((item for item in decisions if item.action == "warn"), BudgetDecision(True, False, "allow", "No blocking policy", None, Decimal(0))))
+    if decision.blocked:
+        record_audit(
+            "policy.request_blocked",
+            organization_id=sdk.organization_id,
+            target_type="provider_model",
+            target_id=f"{provider}:{model}",
+            metadata={
+                "provider": provider,
+                "model": model,
+                "estimated_cost": str(estimated),
+                "reason": decision.reason,
+            },
+        )
     return {"allowed": decision.allowed, "blocked": decision.blocked, "reason": decision.reason, "remaining_budget": str(decision.remaining_budget) if decision.remaining_budget is not None else None, "current_usage": str(decision.current_usage), "action": decision.action}
