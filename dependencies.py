@@ -37,6 +37,19 @@ def get_principal(
         raise HTTPException(status_code=401, detail="Invalid or revoked session") from None
 
 
+def get_optional_principal(
+    authorization: str | None = Header(default=None),
+    tw_access: str | None = Cookie(default=None),
+) -> Principal | None:
+    """Return a valid session when present while allowing public requests."""
+    if not tw_access and not (authorization and authorization.lower().startswith("bearer ")):
+        return None
+    try:
+        return get_principal(authorization=authorization, tw_access=tw_access)
+    except HTTPException:
+        return None
+
+
 def get_tenant(principal: Principal = Depends(get_principal)) -> TenantContext:
     if not principal.organization_id:
         raise HTTPException(status_code=400, detail="No active organization")
