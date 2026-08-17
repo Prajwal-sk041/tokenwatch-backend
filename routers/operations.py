@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
 
 from config import get_settings
-from dependencies import Principal, get_principal, require_platform_admin
+from dependencies import Principal, get_optional_principal, require_platform_admin
 from schemas.requests import SupportTicketCreate
 from services.audit import record_audit
 from services.rate_limit import consume
@@ -32,7 +32,7 @@ def public_status(response: Response):
     incidents = get_db().table("service_incidents").select("service,title,message,status,impact,started_at,resolved_at").order("started_at", desc=True).limit(50).execute().data or [] if database_ok else []
     active = {x["service"] for x in incidents if x["status"] != "resolved"}
     configured = {"api": True, "database": database_ok, "scheduler": bool(settings.cron_secret),
-        "email": bool(settings.resend_api_key or settings.smtp_host), "billing": bool(settings.stripe_secret_key),
+        "email": bool((settings.resend_api_key and settings.smtp_from_email) or (settings.smtp_host and settings.smtp_username and settings.smtp_password and settings.smtp_from_email)), "billing": bool(settings.stripe_secret_key),
         "webhook": bool(settings.stripe_webhook_secret)}
     services = [{"name": name, "status": "outage" if name in active else ("operational" if ready else "not_configured")} for name, ready in configured.items()]
     overall = "operational" if all(x["status"] == "operational" for x in services if x["name"] in {"api","database"}) and not active else "degraded"
@@ -40,12 +40,16 @@ def public_status(response: Response):
 
 
 @router.post("/support/contact", status_code=201)
-def contact(payload: SupportTicketCreate, request: Request, principal: Principal = Depends(get_principal)):
+def contact(payload: SupportTicketCreate, request: Request, principal: Principal | None = Depends(get_optional_principal)):
     consume(request, "support", 5, 3600)
-    row = get_db().table("support_tickets").insert({"organization_id": principal.organization_id, "user_id": principal.user_id,
+    if principal is None and payload.email is None:
+        raise HTTPException(status_code=422, detail="Email is required when contacting support without signing in")
+    organization_id = principal.organization_id if principal else None
+    user_id = principal.user_id if principal else None
+    row = get_db().table("support_tickets").insert({"organization_id": organization_id, "user_id": user_id,
         "category": payload.category, "subject": payload.subject, "message": payload.message,
         "metadata": {"page_url": payload.page_url, "contact_email": str(payload.email) if payload.email else None}}).execute().data[0]
-    record_audit("support.ticket_created", organization_id=principal.organization_id, actor_user_id=principal.user_id, target_type="support_ticket", target_id=str(row["id"]), metadata={"category": payload.category})
+    record_audit("support.ticket_created", organization_id=organization_id, actor_user_id=user_id, target_type="support_ticket", target_id=str(row["id"]), metadata={"category": payload.category})
     return {"id": row["id"], "status": row["status"]}
 
 

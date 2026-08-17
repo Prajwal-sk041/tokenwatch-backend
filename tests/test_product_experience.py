@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -17,6 +18,7 @@ def test_onboarding_progress_validation():
     assert value.completed_steps == [1, 3]
     with pytest.raises(ValidationError):
         OnboardingUpdate(current_step=12, completed_steps=[])
+    assert OnboardingUpdate(current_step=4, integration_type="powershell").integration_type == "powershell"
 
 
 def test_budget_scope_and_threshold_validation():
@@ -24,6 +26,10 @@ def test_budget_scope_and_threshold_validation():
         BudgetPolicyCreate(scope_type="provider", period_type="monthly", amount=10)
     with pytest.raises(ValidationError):
         BudgetPolicyCreate(scope_type="organization", period_type="monthly", amount=10, warning_threshold_percent=101)
+    with pytest.raises(ValidationError):
+        BudgetPolicyCreate(scope_type="organization", period_type="monthly", amount=10, warning_threshold_percent=90, hard_stop_threshold_percent=80)
+    with pytest.raises(ValidationError):
+        BudgetPolicyCreate(scope_type="organization", period_type="monthly", amount=0)
 
 
 def test_alert_webhook_requires_https_and_stubs_validate():
@@ -69,3 +75,16 @@ def test_password_policy_rejects_missing_requirement(password):
 def test_account_management_routes_are_discoverable():
     paths = {route.path for route in app.routes}
     assert {"/auth/me", "/auth/change-password"} <= paths
+
+
+def test_public_support_requires_contact_email(monkeypatch):
+    from fastapi import HTTPException
+    from routers import operations
+    from schemas.requests import SupportTicketCreate
+
+    monkeypatch.setattr(operations, "consume", lambda *_args, **_kwargs: None)
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={})
+    payload = SupportTicketCreate(category="feedback", subject="Useful idea", message="A detailed feedback message")
+    with pytest.raises(HTTPException) as error:
+        operations.contact(payload, request, None)
+    assert error.value.status_code == 422

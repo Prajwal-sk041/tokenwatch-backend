@@ -111,7 +111,7 @@ class BudgetPolicyCreate(StrictModel):
     scope_type: str = Field(pattern=r"^(organization|user|provider|model)$")
     scope_value: str | None = Field(default=None, max_length=160)
     period_type: str = Field(pattern=r"^(daily|monthly)$")
-    amount: float = Field(ge=0, le=1_000_000_000)
+    amount: float = Field(gt=0, le=1_000_000_000)
     warning_threshold_percent: float = Field(default=80, ge=0, le=100)
     hard_stop_threshold_percent: float = Field(default=100, ge=0, le=100)
     action: str = Field(default="block", pattern=r"^(allow|warn|block|log)$")
@@ -122,6 +122,8 @@ class BudgetPolicyCreate(StrictModel):
             raise ValueError("organization scope must not include scope_value")
         if self.scope_type != "organization" and not self.scope_value:
             raise ValueError("scope_value is required for this scope")
+        if self.warning_threshold_percent > self.hard_stop_threshold_percent:
+            raise ValueError("warning threshold must not exceed hard-stop threshold")
         return self
 
 
@@ -216,7 +218,7 @@ class SupportTicketCreate(StrictModel):
 class OnboardingUpdate(StrictModel):
     current_step: int = Field(ge=1, le=11)
     completed_steps: list[int] = Field(default_factory=list, max_length=11)
-    integration_type: str | None = Field(default=None, pattern=r"^(python|node|rest)$")
+    integration_type: str | None = Field(default=None, pattern=r"^(python|node|powershell|rest)$")
     provider: Provider | None = None
     completed: bool = False
     skipped: bool = False
