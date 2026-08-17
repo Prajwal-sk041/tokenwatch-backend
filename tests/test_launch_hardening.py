@@ -35,3 +35,12 @@ def test_policy_decision_ledger_has_rls_and_no_client_grants():
     migration = (ROOT / "migrations" / "202608180002_launch_hardening.sql").read_text()
     assert "enable row level security" in migration
     assert "revoke all on table public.policy_decisions from anon, authenticated" in migration
+
+
+def test_member_api_returns_human_readable_identity_without_secrets():
+    source = (ROOT / "routers" / "organizations.py").read_text()
+    section = source.split("def list_members", 1)[1].split('@router.patch', 1)[0]
+    assert 'select("email,full_name")' in section
+    assert 'member["display_name"]' in section
+    assert 'member["email"]' in section
+    assert "hashed_password" not in section
