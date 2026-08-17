@@ -9,10 +9,16 @@ from schemas.requests import ReconciliationRequest
 from services.reporting import local_day, report_range, timezone_or_422
 from services.insights import build_cost_insights
 from services.entitlements import entitlement_service
+from services.pricing import pricing_catalog
 from utils.database import get_db
 
 
 router = APIRouter(prefix="/usage", tags=["Usage"])
+
+
+@router.get("/pricing-catalog")
+def get_pricing_catalog(tenant: TenantContext = Depends(get_tenant)):
+    return pricing_catalog()
 
 
 @router.post("/reconcile")

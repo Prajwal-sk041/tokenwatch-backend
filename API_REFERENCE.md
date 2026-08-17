@@ -2,6 +2,16 @@
 
 All JSON request models reject unknown fields. Browser routes use HttpOnly session cookies (Bearer access tokens remain supported for non-browser clients). Tenant browser routes use the active organization embedded in the session.
 
+## Launch-readiness controls
+
+- `GET /onboarding/{organization_id}/diagnostics` — checks SDK key, usage receipt, budget, and alert readiness.
+- `GET /usage/pricing-catalog` — returns the versioned USD model-rate catalog and official source links used for estimates.
+- `GET /policy/history` — returns the newest tenant-scoped SDK allow, warn, log, and block decisions.
+- `POST /alerts/{alert_id}/test` — sends a clearly labeled test delivery and records the result.
+- `GET /auth/export` — downloads portable account/workspace data without passwords, session tokens, SDK secrets, or provider keys.
+
+Provider invoices remain authoritative. Hard-stop enforcement requires the caller to invoke `/policy/check` before the provider request and honor a block response.
+
 ## Authentication
 
 - `POST /auth/register` — create user, default organization, and verification challenge.

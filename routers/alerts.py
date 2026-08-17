@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -8,6 +9,7 @@ from services.audit import record_audit
 from services.tenant import TenantContext
 from services.entitlements import entitlement_service
 from utils.database import get_db
+from services.alert_delivery import deliver_alert
 
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
@@ -65,6 +67,23 @@ def update_alert(alert_id: str, payload: AlertUpdate, tenant: TenantContext = De
 @router.get("/history")
 def history(tenant: TenantContext = Depends(get_tenant)):
     return get_db().table("alert_history").select("*").eq("organization_id", tenant.organization_id).order("triggered_at", desc=True).limit(50).execute().data or []
+
+
+@router.post("/{alert_id}/test", status_code=201)
+def test_alert(alert_id: str, tenant: TenantContext = Depends(get_tenant)):
+    if tenant.role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewer cannot test alerts")
+    rules = get_db().table("alert_rules").select("*").eq("id", alert_id).eq("organization_id", tenant.organization_id).is_("deleted_at", "null").limit(1).execute().data or []
+    if not rules:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    rule = rules[0]
+    payload = {"test": True, "metric": rule["metric"], "threshold": rule["threshold"], "provider": rule.get("provider") or "all", "message": "TokenWatch test alert — no budget threshold was crossed."}
+    status, error = deliver_alert(rule["channel"], rule.get("destination"), "TokenWatch test alert", payload)
+    history = get_db().table("alert_history").insert({"organization_id": tenant.organization_id, "rule_id": alert_id, "status": status, "channel": rule["channel"], "current_value": 0, "threshold": rule["threshold"], "deduplication_key": f"test:{uuid.uuid4()}", "payload": payload, "error_message": error, "attempt_count": 1}).execute().data[0]
+    record_audit("alert.tested", organization_id=tenant.organization_id, actor_user_id=tenant.user_id, target_type="alert_rule", target_id=alert_id, metadata={"status": status})
+    if status == "failed":
+        raise HTTPException(status_code=502, detail=error or "Test alert delivery failed")
+    return history
 
 
 def check_alerts_for_all_users():
