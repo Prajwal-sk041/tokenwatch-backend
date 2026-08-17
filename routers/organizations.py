@@ -72,7 +72,17 @@ def accept_invite(payload: TokenActionRequest, principal: Principal = Depends(ge
 @router.get("/{organization_id}/members")
 def list_members(organization_id: str, principal: Principal = Depends(get_principal)):
     require_membership(principal.user_id, organization_id)
-    return get_db().table("organization_members").select("id,user_id,invited_email,role,status,joined_at,created_at").eq("organization_id", organization_id).is_("deleted_at", "null").execute().data or []
+    db = get_db()
+    members = db.table("organization_members").select("id,user_id,invited_email,role,status,joined_at,created_at").eq("organization_id", organization_id).is_("deleted_at", "null").execute().data or []
+    for member in members:
+        member["email"] = member.get("invited_email")
+        member["display_name"] = None
+        if member.get("user_id"):
+            users = db.table("users").select("email,full_name").eq("id", member["user_id"]).is_("deleted_at", "null").limit(1).execute().data or []
+            if users:
+                member["email"] = users[0].get("email")
+                member["display_name"] = users[0].get("full_name") or users[0].get("email")
+    return members
 
 
 @router.patch("/{organization_id}/members/{member_id}")
